@@ -7,6 +7,7 @@ from filememory.desktop import (
     DesktopApp,
     is_setup_complete,
     notification_script,
+    notification_popup_html,
     set_windows_app_user_model_id,
     should_start_hidden,
     tray_menu_labels,
@@ -83,6 +84,13 @@ def test_native_notification_uses_existing_non_blocking_toast_for_eight_seconds(
     assert "New file remembered: new report.txt" in script
     assert "__fileMemoryNativeToastTimer" in script
     assert "8000" in script
+
+
+def test_background_notification_is_editable_and_has_remember_dismiss_actions():
+    html = notification_popup_html()
+    assert "window.pywebview.api.remember" in html
+    assert "window.pywebview.api.dismiss" in html
+    assert "NEW FILE" in html
 
 
 def test_new_file_callback_is_for_watcher_style_indexing_only(tmp_path):

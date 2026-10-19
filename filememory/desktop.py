@@ -24,6 +24,8 @@ from .web import create_server
 
 WEBVIEW_TITLE = "File Memory"
 TOAST_DURATION_MS = 8000
+NOTIFICATION_WIDTH = 380
+NOTIFICATION_HEIGHT = 230
 APP_USER_MODEL_ID = "FileMemory.Desktop"
 TRAY_ICON_NAME = "filememory"
 
@@ -178,6 +180,64 @@ def notification_script(filename: str, note: str = "", suggestion_id: int | None
 """
 
 
+def notification_popup_html() -> str:
+    """Return the small editable background notification surface."""
+    return f"""<!doctype html><html><head><meta charset='utf-8'><style>
+      * {{ box-sizing: border-box; }}
+      html, body {{ width: 100%; height: 100%; margin: 0; overflow: hidden; }}
+      body {{ padding: 16px; background: #faf9f4; color: #17142f; font-family: Segoe UI, Arial, sans-serif; border: 2px solid #17142f; border-radius: 14px; }}
+      .kicker {{ color: #4135ef; font: 800 11px Arial, sans-serif; letter-spacing: .12em; }}
+      .name {{ margin: 8px 0 12px; font: 900 20px/1 Impact, 'Arial Narrow', sans-serif; text-transform: uppercase; overflow-wrap: anywhere; }}
+      input {{ width: 100%; height: 42px; padding: 8px 10px; border: 2px solid #17142f; border-radius: 7px; font: 700 13px Segoe UI, Arial, sans-serif; }}
+      .actions {{ display: flex; gap: 8px; margin-top: 12px; }}
+      button {{ padding: 9px 12px; border: 2px solid #17142f; border-radius: 6px; font: 800 11px Arial, sans-serif; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }}
+      #remember {{ background: #4135ef; color: #d7ff23; }} #dismiss {{ background: transparent; color: #17142f; }}
+    </style></head><body>
+      <div class='kicker'>NEW FILE · REMEMBER IT?</div><div id='name' class='name'>New file</div>
+      <input id='note' aria-label='Note for new file' type='text'>
+      <div class='actions'><button id='remember'>Remember</button><button id='dismiss'>Dismiss</button></div>
+      <script>
+        let timer;
+        window.setNotification = function (payload) {{
+          document.getElementById('name').textContent = payload.filename || 'New file';
+          document.getElementById('note').value = payload.note || '';
+          clearTimeout(timer); timer = setTimeout(() => window.pywebview.api.dismiss(), {TOAST_DURATION_MS});
+        }};
+        document.getElementById('remember').onclick = () => window.pywebview.api.remember(document.getElementById('note').value);
+        document.getElementById('dismiss').onclick = () => window.pywebview.api.dismiss();
+      </script></body></html>"""
+
+
+def notification_popup_position() -> tuple[int, int]:
+    """Place the prompt above the Windows taskbar work area."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        area = wintypes.RECT()
+        if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(area), 0):
+            return (
+                max(area.left, area.right - NOTIFICATION_WIDTH - 18),
+                max(area.top, area.bottom - NOTIFICATION_HEIGHT - 18),
+            )
+    except (AttributeError, OSError):
+        pass
+    return (0, 0)
+
+
+class NotificationBridge:
+    """Methods exposed to the small WebView2 notification prompt."""
+
+    def __init__(self, app: "DesktopApp") -> None:
+        self.app = app
+
+    def remember(self, note: str) -> None:
+        self.app._remember_background_notification(note)
+
+    def dismiss(self) -> None:
+        self.app._dismiss_background_notification()
+
+
 class DesktopApp:
     """Own the loopback service and a native pywebview window."""
 
@@ -198,6 +258,9 @@ class DesktopApp:
         self._tray_thread: threading.Thread | None = None
         self._notifications: queue.Queue[dict[str, Any]] = queue.Queue()
         self._notification_lock = threading.Lock()
+        self._notification_window: Any | None = None
+        self._notification_bridge = NotificationBridge(self)
+        self._background_notification: dict[str, Any] | None = None
 
         # FileMemoryService invokes this from the watchdog worker thread.  The
         # handler never blocks the watcher and only marshals a small toast to
@@ -263,17 +326,45 @@ class DesktopApp:
                         (item for item in self.service.list_pending_suggestions() if item.get("path") == record.get("path")),
                         None,
                     )
-                    self.window.evaluate_js(notification_script(
-                        filename,
-                        str(pending.get("suggested_note", "")) if pending else "",
-                        int(pending["id"]) if pending else None,
-                        str(record.get("path", "")),
-                    ))
+                    note = str(pending.get("suggested_note", "")) if pending else ""
+                    suggestion_id = int(pending["id"]) if pending else None
+                    path = str(record.get("path", ""))
+                    if self._dashboard_hidden and self._notification_window is not None:
+                        self._background_notification = {"suggestion_id": suggestion_id, "path": path}
+                        x, y = notification_popup_position()
+                        self._notification_window.move(x, y)
+                        self._notification_window.evaluate_js(
+                            f"window.setNotification({json.dumps({'filename': filename, 'note': note})})"
+                        )
+                        self._notification_window.show()
+                    else:
+                        self.window.evaluate_js(notification_script(filename, note, suggestion_id, path))
                 except Exception:
                     # A page can close between queueing and evaluating.  Keep
                     # the watcher alive; the dashboard remains available on
                     # relaunch.
                     return
+
+    def _remember_background_notification(self, note: str) -> None:
+        notification = self._background_notification
+        if not notification or not str(note).strip():
+            return
+        try:
+            if notification.get("suggestion_id") is not None:
+                self.service.confirm_suggestion(notification["suggestion_id"], str(note).strip())
+            else:
+                self.service.index_path(notification["path"], note=str(note).strip())
+            self._dismiss_background_notification()
+        except Exception as error:
+            print(f"Warning: could not remember file notification: {error}")
+
+    def _dismiss_background_notification(self) -> None:
+        self._background_notification = None
+        if self._notification_window is not None:
+            try:
+                self._notification_window.hide()
+            except Exception:
+                pass
 
     def _show_dashboard(self, *_args: Any) -> None:
         if self.window is None or self._closed:
@@ -354,6 +445,13 @@ class DesktopApp:
 
     def _exit_from_tray(self, *_args: Any) -> None:
         self._stop_tray()
+        self._dismiss_background_notification()
+        if self._notification_window is not None:
+            try:
+                self._notification_window.destroy()
+            except Exception:
+                pass
+            self._notification_window = None
         if self.window is not None:
             try:
                 self.window.destroy()
@@ -398,6 +496,20 @@ class DesktopApp:
                 # taskbar button.  This keeps the dashboard out of the taskbar
                 # while preserving the running watcher/service process.
                 **window_options(False),
+            )
+            popup_x, popup_y = notification_popup_position()
+            self._notification_window = webview.create_window(
+                "File Memory notification",
+                html=notification_popup_html(),
+                width=NOTIFICATION_WIDTH,
+                height=NOTIFICATION_HEIGHT,
+                x=popup_x,
+                y=popup_y,
+                resizable=False,
+                frameless=True,
+                on_top=True,
+                hidden=True,
+                js_api=self._notification_bridge,
             )
             self.window.events.loaded += self._on_page_loaded
             self.window.events.closed += self._close
