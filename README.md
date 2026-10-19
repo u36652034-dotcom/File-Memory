@@ -86,8 +86,10 @@ Build and run the self-contained backend image:
 
 ```bash
 docker build -t filememory-backend .
-docker run --rm -v "$PWD/data:/data" filememory-backend
+docker run --rm -p 8765:8765 -v "$PWD/data:/data" filememory-backend
 ```
 
-The container command initializes `/data/filememory.sqlite3` and prints
-`filememory ready`. Mount a host data directory to keep the local database.
+Open <http://127.0.0.1:8765/>. The container serves the loopback-style local
+HTTP UI and stores the SQLite database at `/data/filememory.sqlite3`; mount a
+host data directory to keep it between runs. The selected folders must also be
+accessible to the process/container for event watching.

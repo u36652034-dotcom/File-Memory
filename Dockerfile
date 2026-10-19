@@ -11,7 +11,8 @@ RUN apt-get update \
 COPY requirements.txt requirements.lock ./
 RUN python -m pip install --no-cache-dir -r requirements.lock
 COPY filememory ./filememory
+COPY web ./web
 COPY README.md .env.example ./
 
-# The core is a library today; this smoke command initializes its local store.
-CMD ["python", "-c", "from filememory.db import Database; Database('/data/filememory.sqlite3'); print('filememory ready')"]
+EXPOSE 8765
+CMD ["python", "-m", "filememory.web"]
