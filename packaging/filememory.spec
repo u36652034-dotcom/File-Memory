@@ -1,0 +1,94 @@
+# PyInstaller spec for Windows x64 File Memory artifacts.
+# Build with scripts/build_windows.ps1, which sets FILE_MEMORY_BUILD_MODE.
+
+from pathlib import Path
+import os
+import sys
+
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+
+ROOT = Path(SPECPATH).resolve().parent
+MODE = os.environ.get("FILE_MEMORY_BUILD_MODE", "onedir").lower()
+if MODE not in {"onedir", "onefile"}:
+    raise SystemExit(f"Unsupported FILE_MEMORY_BUILD_MODE: {MODE}")
+
+sys.path.insert(0, str(ROOT))
+if not (ROOT / "filememory" / "desktop.py").is_file():
+    raise SystemExit("Native entrypoint filememory/desktop.py is missing.")
+entrypoint = ROOT / "packaging" / "desktop_entrypoint.py"
+
+datas = [
+    (str(ROOT / "web"), "web"),
+    (str(ROOT / "scripts" / "prepare_models.py"), "tools/scripts"),
+    (str(ROOT / "scripts" / "prepare_models_windows.ps1"), "tools/scripts"),
+    (str(ROOT / "requirements-models.lock"), "tools"),
+    (str(ROOT / "requirements-models.txt"), "tools"),
+    (str(ROOT / "assets" / "filememory.ico"), "assets"),
+    (str(ROOT / ".env.example"), "."),
+]
+# Supply clean Python sources for the optional, separate project-local model
+# downloader. Never collect developer caches, databases, secrets, or models.
+datas += [(str(path), "tools/filememory") for path in sorted((ROOT / "filememory").glob("*.py"))]
+
+hiddenimports = collect_submodules("filememory")
+try:
+    hiddenimports += collect_submodules("watchdog")
+except ImportError:
+    # Runtime dependencies are installed by the normal build path. This
+    # fallback keeps the spec importable for static inspection.
+    pass
+try:
+    hiddenimports += collect_submodules("webview")
+    datas += collect_data_files("webview")
+except ImportError:
+    # Runtime packaging installs pywebview from requirements-packaging.lock.
+    # This fallback keeps static spec inspection possible on a non-Windows host.
+    pass
+
+with_models = os.environ.get("FILE_MEMORY_INCLUDE_MODELS") == "1"
+excludes = [] if with_models else [
+    "sentence_transformers", "sentence_transformers.*",
+    "transformers", "transformers.*",
+    "torch", "torch.*", "sklearn", "sklearn.*", "scipy", "scipy.*", "numpy", "numpy.*",
+]
+
+analysis = Analysis(
+    [str(entrypoint)],
+    pathex=[str(ROOT)],
+    binaries=[],
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=excludes,
+    noarchive=False,
+)
+pyz = PYZ(analysis.pure)
+name = "FileMemory" if MODE == "onedir" else "FileMemory-onefile"
+exe = EXE(
+    pyz,
+    analysis.scripts,
+    *( [[], []] if MODE == "onedir" else [analysis.binaries, analysis.datas] ),
+    [],
+    name=name,
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    contents_directory=".",
+    icon=str(ROOT / "assets" / "filememory.ico"),
+    exclude_binaries=MODE == "onedir",
+)
+
+if MODE == "onedir":
+    coll = COLLECT(
+        exe,
+        analysis.binaries,
+        analysis.datas,
+        strip=False,
+        upx=False,
+        name=name,
+    )

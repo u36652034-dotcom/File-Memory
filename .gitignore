@@ -7,3 +7,6 @@ data/
 .env
 .opencode/
 .models/
+assets/filememory.ico
+build/
+dist/

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .actions import open_file, open_folder
 from .db import Database
@@ -21,7 +21,12 @@ class ConfirmationRequired(ValueError):
 
 
 class FileMemoryService:
-    def __init__(self, database: Database | None = None, embedding_provider: EmbeddingProvider | None = None) -> None:
+    def __init__(
+        self,
+        database: Database | None = None,
+        embedding_provider: EmbeddingProvider | None = None,
+        on_new_file: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.database = database or Database()
         self.indexer = FileIndexer(self.database)
         self.embedding_provider = embedding_provider or EmbeddingProvider()
@@ -30,6 +35,9 @@ class FileMemoryService:
         self.groq_suggestions = GroqSuggestionProvider()
         self._watcher = None
         self.tracking_error: str | None = None
+        # Watcher callbacks run on a watchdog timer thread. Consumers must
+        # marshal UI work back to their own event loop.
+        self.on_new_file = on_new_file
 
     def add_folder(self, path: str) -> dict[str, Any]:
         candidate = Path(path).expanduser().resolve(strict=False)
@@ -70,6 +78,10 @@ class FileMemoryService:
             if updates["ai_mode"] not in AI_MODES:
                 raise ValueError(f"ai_mode must be one of: {', '.join(AI_MODES)}")
             current["ai_mode"] = updates["ai_mode"]
+        if "setup_complete" in updates:
+            if not isinstance(updates["setup_complete"], bool):
+                raise ValueError("setup_complete must be a boolean")
+            current["setup_complete"] = updates["setup_complete"]
         if "ignored_extensions" in updates:
             values = updates["ignored_extensions"]
             if isinstance(values, str):
@@ -124,6 +136,8 @@ class FileMemoryService:
                 self.database.add_pending_suggestion(
                     result.record["id"], candidate, suggested_note.strip(), provider
                 )
+        if previous is None and respect_pause and self.on_new_file is not None:
+            self.on_new_file(self._without_embedding(result.record))
         return result
 
     def _index_folder(self, path: str) -> dict[str, Any]:

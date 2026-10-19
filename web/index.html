@@ -96,6 +96,7 @@
 
       <footer id="about" class="site-footer">
         <span>File Memory / v0.1</span>
+        <span>Vibecoded by Osman <b aria-hidden="true">♥</b> · with OmniRush <b aria-hidden="true">♥</b></span>
         <span>Nothing leaves this machine.</span>
       </footer>
     </div>
@@ -145,6 +146,16 @@
       </div>
     </dialog>
 
+    <section id="native-file-prompt" class="native-file-prompt" aria-live="polite" hidden>
+      <div class="native-file-kicker">NEW FILE · REMEMBER IT?</div>
+      <div id="native-file-name" class="native-file-name"></div>
+      <label class="sr-only" for="native-file-note">Note for new file</label>
+      <input id="native-file-note" class="native-file-note" type="text" />
+      <div class="native-file-actions">
+        <button id="native-file-save" class="native-file-save" type="button">Remember</button>
+        <button id="native-file-dismiss" class="native-file-dismiss" type="button">Dismiss</button>
+      </div>
+    </section>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="app.js" defer></script>
   </body>

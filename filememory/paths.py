@@ -32,6 +32,12 @@ def model_cache_dir() -> Path:
     return path
 
 
+def resource_path(relative: str) -> Path:
+    """Resolve bundled resources for both source and PyInstaller runs."""
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return bundle_root / relative
+
+
 def load_dotenv(path: str | Path = ".env") -> None:
     """Load simple KEY=VALUE pairs without adding a dotenv dependency."""
     dotenv = Path(path)

@@ -9,6 +9,7 @@
   const folderCount = $("#folder-count");
   const toast = $("#toast");
   let toastTimer;
+  let nativePromptTimer;
 
   function endpoint(path) { return API_BASE + path; }
 
@@ -62,6 +63,38 @@
       return request("/api/actions/open-folder", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ path: path }) });
     }
   };
+
+  window.showNativeFilePrompt = function (payload) {
+    const prompt = $("#native-file-prompt");
+    if (!prompt) return;
+    clearTimeout(nativePromptTimer);
+    $("#native-file-name").textContent = payload.filename || "New file";
+    $("#native-file-note").value = payload.note || "";
+    prompt.hidden = false;
+    prompt.dataset.suggestionId = payload.suggestion_id || "";
+    prompt.dataset.path = payload.path || "";
+    nativePromptTimer = setTimeout(function () { prompt.hidden = true; }, 8000);
+  };
+
+  $("#native-file-dismiss").addEventListener("click", function () {
+    $("#native-file-prompt").hidden = true;
+    clearTimeout(nativePromptTimer);
+  });
+
+  $("#native-file-save").addEventListener("click", async function () {
+    const prompt = $("#native-file-prompt");
+    const note = $("#native-file-note").value.trim();
+    const suggestionId = prompt.dataset.suggestionId;
+    if (!note) { showToast("Add a note before saving.", true); return; }
+    try {
+      if (suggestionId) await api.confirmSuggestion(Number(suggestionId), note);
+      prompt.hidden = true;
+      clearTimeout(nativePromptTimer);
+      showToast("File remembered.", false);
+      loadSuggestions();
+      if (state.query) search();
+    } catch (error) { showToast(error.message, true); }
+  });
 
   function setState(name) {
     ["empty", "loading", "error", "no-results"].forEach(function (key) {

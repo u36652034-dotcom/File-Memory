@@ -18,6 +18,7 @@ class EmbeddingProvider:
         self._loader = loader
         self._model: Any = None
         self._attempted = False
+        self.last_error: str | None = None
 
     def _get_model(self) -> Any | None:
         if self._attempted:
@@ -34,9 +35,17 @@ class EmbeddingProvider:
                     cache_folder=str(model_cache_dir()),
                     local_files_only=os.getenv("FILE_MEMORY_OFFLINE_MODE", "1") == "1",
                 )
-        except Exception:
+        except Exception as error:
             self._model = None
+            self.last_error = str(error)
         return self._model
+
+    def readiness(self) -> tuple[bool, str]:
+        """Load the optional model and return a user-facing readiness status."""
+        if self._get_model() is not None:
+            return True, f"{self.model_name} is ready"
+        detail = self.last_error or "the model is not installed in the local cache"
+        return False, f"{self.model_name} is unavailable: {detail}"
 
     def encode(self, text: str) -> list[float] | None:
         model = self._get_model()

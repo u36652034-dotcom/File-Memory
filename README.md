@@ -93,6 +93,40 @@ system Python is used without installing `requirements.lock`, the UI can still
 start but it will display a filesystem-tracking warning; use the project-local
 interpreter above to enable event watching.
 
+## Run the native Windows desktop app
+
+The desktop entrypoint starts the same loopback API in-process and displays
+the existing `web/index.html`, `web/styles.css`, and `web/app.js` through
+pywebview's native Microsoft Edge WebView2 backend. It does not launch an
+external browser or replace the web UI with a second desktop UI. On first run,
+use **Watched folders** and **Settings** in the embedded app to choose a folder
+and configure tracking/provider options; those controls use the existing API.
+Install the packaging lock in the project environment first:
+
+```powershell
+python -m pip install -r requirements-packaging.lock
+.\.venv\Scripts\python.exe -m filememory.desktop
+```
+
+The embedded app supports the same keyword/semantic search, safe
+open-file/open-folder and copy-path actions, editable pending notes,
+watched-folder management, AI mode, and tracking controls as the local web
+app. New watcher events use the web UI's non-blocking toast and auto-hide after
+eight seconds. To preserve the startup shortcut behavior, pass `--minimized`:
+
+```powershell
+.\.venv\Scripts\python.exe -m filememory.desktop --minimized
+```
+
+Windows must have the Microsoft Edge WebView2 Runtime installed. pywebview and
+the PyInstaller package do not bundle that runtime; the Evergreen WebView2
+Runtime is normally present on supported Windows installations and can be
+installed separately by an administrator or device-management tool if it is
+missing.
+
+If the embedding model is not ready, the existing web Settings surface keeps
+the app usable with offline keyword search and deterministic note suggestions.
+
 ## Python service API
 
 ```python
@@ -147,3 +181,65 @@ Open <http://127.0.0.1:8765/>. The container serves the loopback-style local
 HTTP UI and stores the SQLite database at `/data/filememory.sqlite3`; mount a
 host data directory to keep it between runs. The selected folders must also be
 accessible to the process/container for event watching.
+
+## Windows x64 packaging
+
+Packaging is performed on Windows x64 with the project-local Python 3.12
+environment. PyInstaller does not cross-compile Windows executables, so run
+these commands from a Windows x64 checkout:
+
+```powershell
+py -3.12 -m venv .venv                 # only needed once
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\scripts\build_windows.ps1 -Mode both
+```
+
+The build script installs PyInstaller and Pillow only into `.venv` when they
+are missing, generates `assets\filememory.ico`, and writes these portable
+artifacts:
+
+* `dist\FileMemory\` — onedir distribution, suitable for the installer.
+* `dist\FileMemory-onefile.exe` — onefile distribution for copying as one
+  executable.
+
+Use the project interpreter to run the validation script after a build:
+
+```powershell
+.\scripts\validate_windows_package.ps1 -Mode both
+```
+
+The spec includes every `filememory` module, the exact `web` files, pywebview,
+and the model download scripts. It uses `filememory\desktop.py` through
+`packaging\desktop_entrypoint.py`, so the packaged app opens the native
+WebView2 shell rather than an external browser. The installer build includes
+the model runtime so the embedded web UI can use the optional local model after
+installation. The application stores its database and model cache in the
+user's application-data directory by default.
+
+### Per-user installer
+
+Install [Inno Setup](https://jrsoftware.org/isinfo.php) on the Windows build
+machine, build the onedir artifact, then compile the installer:
+
+```powershell
+.\scripts\build_installer.ps1
+```
+
+If `dist\FileMemory\` already exists, skip the PyInstaller step:
+
+```powershell
+.\scripts\build_installer.ps1 -SkipPackageBuild
+```
+
+The installer defaults to `%LOCALAPPDATA%\Programs\File Memory` and declares
+`PrivilegesRequired=lowest`, so administrator elevation is not required. It
+creates Start Menu and Desktop shortcuts and shows a checked-by-default,
+explicit checkbox for adding a minimized shortcut in the per-user Startup
+folder. A separate
+post-install checkbox lets the user launch the app immediately. File Memory
+only accesses folders the user explicitly selects inside the app; it does not
+request or require administrator-only Windows permissions.
+
+`ISCC.exe` is an external Inno Setup tool and is not installed by the project
+scripts. If it is unavailable, `build_installer.ps1` stops with an actionable
+message; PyInstaller artifacts can still be built and validated independently.
