@@ -1,0 +1,4 @@
+# Runtime integration used by filememory.watcher (loaded only when watching).
+watchdog==6.0.0
+# Offline development and verification.
+pytest==8.3.5
