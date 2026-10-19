@@ -8,15 +8,28 @@ to regenerate the exact ICO on a clean machine.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 
-INDIGO = (35, 29, 83, 255)
-CHARTREUSE = (205, 255, 73, 255)
-PAPER = (249, 247, 238, 255)
+INDIGO = (42, 43, 181, 255)
+CHARTREUSE = (205, 255, 18, 255)
+BLACK = (4, 4, 8, 255)
 SIZES = (16, 24, 32, 48, 64, 128, 256)
+
+
+def _font(size: int) -> ImageFont.ImageFont:
+    candidates = []
+    windir = os.getenv("WINDIR")
+    if windir:
+        candidates.append(Path(windir) / "Fonts" / "arialbd.ttf")
+    candidates.extend((Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),))
+    for candidate in candidates:
+        if candidate.is_file():
+            return ImageFont.truetype(str(candidate), max(8, size))
+    return ImageFont.load_default()
 
 
 def make_icon(output: Path) -> Path:
@@ -27,30 +40,30 @@ def make_icon(output: Path) -> Path:
     for size in SIZES:
         image = Image.new("RGBA", (size, size), INDIGO)
         draw = ImageDraw.Draw(image)
-        margin = max(1, size // 10)
-        # A soft paper tile keeps the mark readable in the taskbar.
-        draw.rounded_rectangle(
-            (margin, margin, size - margin, size - margin),
-            radius=max(2, size // 8),
-            fill=PAPER,
+        # The supplied reference mark: blue field, lime outer keyline,
+        # sixteen lime tiles, and a black FM monogram over the middle.
+        border = max(1, size // 18)
+        draw.rectangle((border, border, size - border - 1, size - border - 1), outline=CHARTREUSE, width=border)
+        inset = max(2, size // 8)
+        gap = max(1, size // 28)
+        grid_size = size - inset * 2
+        tile = max(1, (grid_size - gap * 3) // 4)
+        for row in range(4):
+            for column in range(4):
+                left = inset + column * (tile + gap)
+                top = inset + row * (tile + gap)
+                draw.rectangle((left, top, left + tile, top + tile), fill=CHARTREUSE)
+        font_size = max(8, int(size * 0.43))
+        font = _font(font_size)
+        label = "FM"
+        box = draw.textbbox((0, 0), label, font=font, stroke_width=0)
+        label_width, label_height = box[2] - box[0], box[3] - box[1]
+        draw.text(
+            ((size - label_width) / 2 - box[0], (size - label_height) / 2 - box[1] + size * 0.01),
+            label,
+            fill=BLACK,
+            font=font,
         )
-        # A bright feather is the File Memory mark: light, private, and easy
-        # to recognize in the taskbar at 16px.
-        cx, cy = size * 0.53, size * 0.54
-        feather = [
-            (size * 0.23, size * 0.73), (size * 0.27, size * 0.40),
-            (size * 0.48, size * 0.18), (size * 0.76, size * 0.16),
-            (size * 0.82, size * 0.31), (size * 0.66, size * 0.58),
-            (size * 0.39, size * 0.76),
-        ]
-        draw.polygon(feather, fill=CHARTREUSE)
-        stem = max(2, size // 12)
-        draw.line((size * 0.23, size * 0.78, size * 0.73, size * 0.25), fill=INDIGO, width=stem)
-        for fraction in (0.37, 0.47, 0.57, 0.67):
-            x = size * fraction
-            y = size * (0.50 - (fraction - 0.37) * 0.48)
-            draw.line((x, y, x - size * 0.16, y + size * 0.10), fill=INDIGO, width=max(1, size // 18))
-        draw.ellipse((cx - size * 0.035, cy - size * 0.035, cx + size * 0.035, cy + size * 0.035), fill=PAPER)
         images.append(image)
 
     images[-1].save(output, format="ICO", sizes=[(size, size) for size in SIZES], append_images=images[:-1])

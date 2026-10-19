@@ -216,6 +216,10 @@ the model runtime so the embedded web UI can use the optional local model after
 installation. The application stores its database and model cache in the
 user's application-data directory by default.
 
+The native shell and packaged executable use the custom blue/lime FM grid icon
+in `assets\filememory.ico`. The dashboard footer credits **Vibecoded by Osman
+♥ · with OmniRush ♥**.
+
 ### Per-user installer
 
 Install [Inno Setup](https://jrsoftware.org/isinfo.php) on the Windows build

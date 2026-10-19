@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .db import Database
-from .paths import load_dotenv
+from .paths import load_dotenv, resource_path
 from .service import FileMemoryService
 from .web import create_server
 
@@ -54,6 +54,36 @@ def window_options(start_minimized: bool = False) -> dict[str, Any]:
         "resizable": True,
         "minimized": start_minimized,
     }
+
+
+def apply_windows_icon(title: str = WEBVIEW_TITLE) -> bool:
+    """Apply the bundled ICO to the native WebView2 title bar/taskbar window."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, title)
+        if not hwnd:
+            return False
+        icon_path = resource_path("assets/filememory.ico")
+        if not icon_path.is_file():
+            return False
+        image_icon = user32.LoadImageW(
+            None,
+            str(icon_path),
+            1,  # IMAGE_ICON
+            0,
+            0,
+            0x00000010 | 0x00000040,  # LR_LOADFROMFILE | LR_DEFAULTSIZE
+        )
+        if not image_icon:
+            return False
+        user32.SendMessageW(hwnd, 0x0080, 1, image_icon)  # WM_SETICON / ICON_BIG
+        user32.SendMessageW(hwnd, 0x0080, 0, image_icon)  # WM_SETICON / ICON_SMALL
+        return True
+    except (AttributeError, OSError):
+        return False
 
 
 def notification_script(filename: str, note: str = "", suggestion_id: int | None = None, path: str = "") -> str:
@@ -208,6 +238,10 @@ class DesktopApp:
             )
             self.window.events.loaded += self._on_page_loaded
             self.window.events.closed += self._close
+            # pywebview does not expose an icon argument. Apply the ICO after
+            # the native window exists; the delayed retry handles WebView2's
+            # asynchronous HWND creation.
+            threading.Timer(0.8, apply_windows_icon).start()
             # edgechromium is pywebview's Microsoft Edge WebView2 backend on
             # Windows.  The runtime is intentionally supplied by Windows and
             # is not bundled into the PyInstaller artifact.
