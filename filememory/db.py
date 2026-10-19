@@ -69,6 +69,14 @@ CREATE TABLE IF NOT EXISTS search_cache (
     created_at TEXT NOT NULL,
     expires_at TEXT
 );
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value_json TEXT NOT NULL
+);
+INSERT OR IGNORE INTO settings(key, value_json) VALUES
+    ('tracking_paused', 'false'),
+    ('ai_mode', '"no_ai"'),
+    ('ignored_extensions', '[]');
 """
 
 
@@ -135,6 +143,33 @@ class Database:
                 "DELETE FROM watched_folders WHERE path = ?", (normalized,)
             )
         return result.rowcount > 0
+
+    def get_settings(self) -> dict[str, Any]:
+        with self.connection() as connection:
+            rows = connection.execute("SELECT key, value_json FROM settings").fetchall()
+        return {row["key"]: json.loads(row["value_json"]) for row in rows}
+
+    def set_setting(self, key: str, value: Any) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                """INSERT INTO settings(key, value_json) VALUES (?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json""",
+                (key, json.dumps(value)),
+            )
+
+    def delete_file(self, path: str | Path) -> bool:
+        normalized = str(Path(path).expanduser().resolve())
+        with self.connection() as connection:
+            result = connection.execute("DELETE FROM files WHERE path = ?", (normalized,))
+            connection.execute("DELETE FROM search_cache")
+        return result.rowcount > 0
+
+    def rebuild_search_index(self) -> int:
+        with self.connection() as connection:
+            connection.execute("INSERT INTO files_fts(files_fts) VALUES ('rebuild')")
+            connection.execute("DELETE FROM search_cache")
+            row = connection.execute("SELECT COUNT(*) FROM files").fetchone()
+        return int(row[0])
 
     def folder_for_path(self, path: str | Path) -> int | None:
         normalized = str(Path(path).expanduser().resolve())

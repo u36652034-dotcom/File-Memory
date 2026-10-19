@@ -25,9 +25,26 @@ by an application, models are loaded lazily and failures fall back safely.
 Copy `.env.example` to `.env` only when configuring the optional Groq provider.
 Never commit credentials.
 
-## Run
+## Run the local inbox and settings screen
 
-The service can be embedded in a future HTTP API or a Python process:
+Start the loopback-only app with the standard library HTTP server:
+
+```bash
+python -m filememory.web
+```
+
+Open <http://127.0.0.1:8765/>. The Inbox searches indexed files and provides
+safe open and forget actions. Settings lets you add/remove watched folder
+paths, pause tracking, choose **No AI** (default), **Local AI**, or **Groq**,
+ignore extensions, and rebuild the search index. Folder removal and forgetting
+an indexed file require a browser confirmation; forgetting never deletes the
+real file.
+
+All API routes bind to `127.0.0.1` by default. The UI has no external assets or
+network calls. When Groq is selected, only the optional note suggestion call
+uses the configured Groq endpoint.
+
+## Python service API
 
 ```python
 from filememory.service import FileMemoryService
@@ -38,7 +55,15 @@ service.index_path("/home/me/Documents/plan.txt", note="project plan")
 matches = service.search("where is the project plan?", semantic=True)
 ```
 
-Use `filememory.watcher.FolderWatcher` with the folders returned by
+`service.get_settings()` and `service.update_settings(...)` persist the pause
+state, chat suggestion mode, and ignored extensions. Semantic search is
+independent of the chat suggestion setting: it attempts the lazy
+`all-MiniLM-L6-v2` embedding model whenever Meaning is selected and falls back
+to SQLite keyword ranking if the model cannot load. `service.rebuild_search_index()` is an
+explicit scan of selected folders plus an FTS rebuild. `forget_file` and
+`remove_folder` require `confirmed=True` and never remove user files.
+
+Use `start_tracking()` and `stop_tracking()` with the folders returned by
 `list_folders()` to receive watchdog create/modify/move events. Events are
 indexed only after a file is stable; incomplete download suffixes are skipped.
 `open_file` and `open_folder` use argument arrays (never a shell) and reject

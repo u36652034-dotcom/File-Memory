@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Local-first memory for the files you choose to watch." />
+    <title>File Memory / Local Search</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="site-header">
+        <a class="brand" href="./" aria-label="File Memory home">
+          <span class="brand-mark" aria-hidden="true">FM</span>
+          <span>file<span class="brand-accent">memory</span></span>
+        </a>
+        <nav class="primary-nav" aria-label="Primary navigation">
+          <a class="nav-link active" href="#search">Inbox</a>
+          <button class="nav-link" id="folders-open" type="button">Watched folders</button>
+          <button class="nav-link" id="settings-open" type="button">Settings</button>
+          <a class="nav-link" href="#about">About</a>
+        </nav>
+        <div class="connection-pill" title="This app is designed for local-only use">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>Local <b aria-hidden="true">•</b> Solo</span>
+        </div>
+      </header>
+
+      <main id="search" class="main-layout">
+        <section class="intro-column" aria-labelledby="page-title">
+          <div class="eyebrow"><span aria-hidden="true">✳</span> Your files, remembered</div>
+          <h1 id="page-title">Find<br /><em>anything.</em></h1>
+          <p class="intro-copy">Search the files you chose to keep close. Fast, private, and at home on your machine.</p>
+          <div class="folder-summary" aria-live="polite">
+            <span class="summary-number" id="folder-count">—</span>
+            <span class="summary-label">folders<br />being watched</span>
+            <button class="text-button" type="button" id="folders-open-secondary">Manage <span aria-hidden="true">↗</span></button>
+          </div>
+          <div class="stamp" aria-label="Local first, no cloud required">LOCAL<br /><span>FIRST</span></div>
+        </section>
+
+        <section class="search-column" aria-labelledby="search-heading">
+          <div class="section-kicker"><span>01</span> Search your memory</div>
+          <div class="search-card">
+            <h2 id="search-heading">What are you<br /><strong>looking for?</strong></h2>
+            <form id="search-form" class="search-form" role="search">
+              <label class="sr-only" for="search-input">Search files, notes, and paths</label>
+              <div class="input-wrap">
+                <span class="search-glyph" aria-hidden="true">⌕</span>
+                <input id="search-input" name="q" type="search" autocomplete="off" placeholder="Try “project brief”" />
+                <button class="submit-button" type="submit" aria-label="Search">→</button>
+              </div>
+              <div class="search-options" role="group" aria-label="Search mode">
+                <span class="option-label">Match by</span>
+                <button class="mode-button active" type="button" data-mode="semantic" aria-pressed="true">Meaning</button>
+                <button class="mode-button" type="button" data-mode="keyword" aria-pressed="false">Exact words</button>
+              </div>
+            </form>
+          </div>
+
+          <div id="results-region" class="results-region" aria-live="polite" aria-atomic="false">
+            <div id="state-empty" class="state-card state-empty">
+              <div class="state-icon" aria-hidden="true">✦</div>
+              <h3>Start with a thought.</h3>
+              <p>Search filenames, notes, snippets, or paths. Your results stay local.</p>
+            </div>
+            <div id="state-loading" class="state-card state-loading" hidden>
+              <div class="loader" aria-hidden="true"></div>
+              <h3>Looking through memory<span class="loading-dots" aria-hidden="true">...</span></h3>
+              <p>Checking the files you have chosen to watch.</p>
+            </div>
+            <div id="state-error" class="state-card state-error" hidden>
+              <div class="state-icon" aria-hidden="true">!</div>
+              <h3 id="error-title">Memory is offline.</h3>
+              <p id="error-message">The local API could not be reached. Start the backend and try again.</p>
+              <button id="retry-button" class="dark-button" type="button">Try again</button>
+            </div>
+            <div id="state-no-results" class="state-card state-no-results" hidden>
+              <div class="state-icon" aria-hidden="true">∅</div>
+              <h3>No matches this time.</h3>
+              <p>Try fewer words, or switch between meaning and exact words.</p>
+            </div>
+            <div id="results-list" class="results-list" hidden></div>
+          </div>
+        </section>
+      </main>
+
+      <footer id="about" class="site-footer">
+        <span>File Memory / v0.1</span>
+        <span>Nothing leaves this machine.</span>
+      </footer>
+    </div>
+
+    <dialog id="folders-dialog" class="folders-dialog" aria-labelledby="folders-title">
+      <div class="dialog-card">
+        <div class="dialog-topline">
+          <span class="section-kicker"><span>02</span> Configuration</span>
+          <button id="folders-close" class="icon-button" type="button" aria-label="Close watched folders">×</button>
+        </div>
+        <h2 id="folders-title">Watched<br /><strong>folders.</strong></h2>
+        <p class="dialog-copy">Only folders listed here are part of your local memory.</p>
+        <form id="folder-form" class="folder-form">
+          <label for="folder-input">Add a folder path</label>
+          <div class="folder-input-row">
+            <input id="folder-input" name="path" type="text" required placeholder="/Users/you/Documents" />
+            <button class="submit-button" type="submit" aria-label="Add folder">+</button>
+          </div>
+        </form>
+        <div id="folder-state" class="folder-state" aria-live="polite"></div>
+        <ul id="folders-list" class="folders-list" aria-label="Watched folders"></ul>
+      </div>
+    </dialog>
+
+    <dialog id="settings-dialog" class="folders-dialog" aria-labelledby="settings-title">
+      <div class="dialog-card settings-card">
+        <div class="dialog-topline">
+          <span class="section-kicker"><span>03</span> Preferences</span>
+          <button id="settings-close" class="icon-button" type="button" aria-label="Close settings">×</button>
+        </div>
+        <h2 id="settings-title">Keep it<br /><strong>yours.</strong></h2>
+        <p class="dialog-copy">Everything stays on this computer. No AI is the default.</p>
+        <form id="settings-form" class="settings-form">
+          <label class="settings-toggle"><span><b>Pause tracking</b><small>Stop filesystem events without forgetting your index.</small></span><input id="pause-tracking" type="checkbox" /></label>
+          <label for="ai-mode">AI mode</label>
+          <select id="ai-mode">
+            <option value="no_ai">No AI (default)</option>
+            <option value="local_ai">Local AI</option>
+            <option value="groq">Groq</option>
+          </select>
+          <label for="ignored-extensions">Ignored file types</label>
+          <input id="ignored-extensions" type="text" placeholder=".log, .tmp, .iso" />
+          <button class="dark-button" type="submit">Save settings</button>
+          <button id="rebuild-index" class="action-button" type="button">Rebuild search index</button>
+          <div id="settings-state" class="folder-state" aria-live="polite"></div>
+        </form>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script src="app.js" defer></script>
+  </body>
+</html>
