@@ -24,6 +24,8 @@ from .web import create_server
 
 WEBVIEW_TITLE = "File Memory"
 TOAST_DURATION_MS = 8000
+APP_USER_MODEL_ID = "FileMemory.Desktop"
+TRAY_ICON_NAME = "filememory"
 
 
 def create_local_server(
@@ -56,14 +58,69 @@ def window_options(start_minimized: bool = False) -> dict[str, Any]:
     }
 
 
-def apply_windows_icon(title: str = WEBVIEW_TITLE) -> bool:
-    """Apply the bundled ICO to the native WebView2 title bar/taskbar window."""
+def should_start_hidden(start_minimized: bool, setup_complete: bool) -> bool:
+    """Return whether startup may hide the dashboard in the notification area.
+
+    A startup shortcut can request ``--minimized``, but a new installation must
+    remain visible so the user can select a watched folder and finish setup.
+    """
+
+    return bool(start_minimized and setup_complete)
+
+
+def is_setup_complete(service: FileMemoryService) -> bool:
+    """Read the persisted setup marker, with a legacy-folder fallback.
+
+    Older databases predate the optional ``setup_complete`` setting.  A
+    selected folder is enough to recognize those installs as configured while
+    still allowing an explicit ``False`` marker to force the dashboard open.
+    """
+
+    settings = service.get_settings()
+    if "setup_complete" in settings:
+        return bool(settings["setup_complete"])
+    return bool(service.list_folders())
+
+
+def tray_menu_labels(tracking_paused: bool) -> tuple[str, str, str, str]:
+    """Return the user-visible tray actions without importing a GUI backend."""
+
+    return (
+        "Show dashboard",
+        "Hide dashboard",
+        "Resume tracking" if tracking_paused else "Pause tracking",
+        "Exit",
+    )
+
+
+def set_windows_app_user_model_id(app_id: str = APP_USER_MODEL_ID) -> bool:
+    """Set the process identity used by Windows taskbar grouping and shortcuts."""
+
     try:
         import ctypes
-        from ctypes import wintypes
+
+        result = ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            ctypes.c_wchar_p(app_id)
+        )
+        # HRESULT S_OK is zero.  Keep this helper harmless on unsupported hosts.
+        return int(result) == 0
+    except (AttributeError, OSError):
+        return False
+
+
+def apply_windows_icon(title: str = WEBVIEW_TITLE, hwnd: int | None = None) -> bool:
+    """Apply the bundled ICO to the WebView2 window and its class icons.
+
+    ``WM_SETICON`` covers the visible window.  Setting both class icon slots is
+    important for WebView2/taskbar surfaces that derive their image from the
+    native window class rather than the current window instance.
+    """
+
+    try:
+        import ctypes
 
         user32 = ctypes.windll.user32
-        hwnd = user32.FindWindowW(None, title)
+        hwnd = hwnd or user32.FindWindowW(None, title)
         if not hwnd:
             return False
         icon_path = resource_path("assets/filememory.ico")
@@ -81,6 +138,11 @@ def apply_windows_icon(title: str = WEBVIEW_TITLE) -> bool:
             return False
         user32.SendMessageW(hwnd, 0x0080, 1, image_icon)  # WM_SETICON / ICON_BIG
         user32.SendMessageW(hwnd, 0x0080, 0, image_icon)  # WM_SETICON / ICON_SMALL
+        set_class_icon = getattr(user32, "SetClassLongPtrW", None)
+        if set_class_icon is None:
+            set_class_icon = user32.SetClassLongW
+        set_class_icon(hwnd, -14, image_icon)  # GCLP_HICON
+        set_class_icon(hwnd, -34, image_icon)  # GCLP_HICONSM
         return True
     except (AttributeError, OSError):
         return False
@@ -131,6 +193,9 @@ class DesktopApp:
         self._server_thread: threading.Thread | None = None
         self._closed = False
         self._page_loaded = False
+        self._dashboard_hidden = False
+        self._tray_icon: Any | None = None
+        self._tray_thread: threading.Thread | None = None
         self._notifications: queue.Queue[dict[str, Any]] = queue.Queue()
         self._notification_lock = threading.Lock()
 
@@ -210,10 +275,98 @@ class DesktopApp:
                     # relaunch.
                     return
 
+    def _show_dashboard(self, *_args: Any) -> None:
+        if self.window is None or self._closed:
+            return
+        try:
+            self.window.show()
+            self._dashboard_hidden = False
+        except Exception:
+            return
+
+    def _hide_dashboard(self, *_args: Any) -> None:
+        if self.window is None or self._closed:
+            return
+        try:
+            self.window.hide()
+            self._dashboard_hidden = True
+        except Exception:
+            return
+
+    def _toggle_tracking(self, *_args: Any) -> None:
+        try:
+            self.service.update_settings(
+                tracking_paused=not self.service.is_tracking_paused()
+            )
+            if self._tray_icon is not None:
+                self._tray_icon.update_menu()
+        except Exception as error:
+            print(f"Warning: could not change tracking state: {error}")
+
+    def _create_tray_icon(self) -> Any:
+        """Create the pystray icon while keeping all imports display-lazy."""
+
+        try:
+            import pystray
+            from PIL import Image
+        except ImportError as error:
+            raise RuntimeError(
+                "The Windows desktop shell requires pystray and Pillow. Install "
+                "requirements-packaging.lock in the project environment."
+            ) from error
+
+        icon_path = resource_path("assets/filememory.ico")
+        if not icon_path.is_file():
+            raise RuntimeError(f"Missing tray icon: {icon_path}")
+        image = Image.open(icon_path)
+        show_label, hide_label, _, exit_label = tray_menu_labels(
+            self.service.is_tracking_paused()
+        )
+        menu = pystray.Menu(
+            pystray.MenuItem(show_label, self._show_dashboard),
+            pystray.MenuItem(hide_label, self._hide_dashboard),
+            pystray.MenuItem(
+                lambda _item: tray_menu_labels(self.service.is_tracking_paused())[2],
+                self._toggle_tracking,
+            ),
+            pystray.MenuItem(exit_label, self._exit_from_tray),
+        )
+        return pystray.Icon(TRAY_ICON_NAME, image, WEBVIEW_TITLE, menu)
+
+    def _start_tray(self) -> None:
+        if self._tray_icon is not None:
+            return
+        self._tray_icon = self._create_tray_icon()
+        self._tray_thread = threading.Thread(
+            target=self._tray_icon.run,
+            name="filememory-tray",
+            daemon=True,
+        )
+        self._tray_thread.start()
+
+    def _stop_tray(self) -> None:
+        if self._tray_icon is not None:
+            try:
+                self._tray_icon.stop()
+            except Exception:
+                pass
+            self._tray_icon = None
+
+    def _exit_from_tray(self, *_args: Any) -> None:
+        self._stop_tray()
+        if self.window is not None:
+            try:
+                self.window.destroy()
+                return
+            except Exception:
+                pass
+        self._close()
+
     def _close(self, *_args: Any) -> None:
         if self._closed:
             return
         self._closed = True
+        self._stop_tray()
         self.service.stop_tracking()
         self.server.shutdown()
         self.server.server_close()
@@ -231,21 +384,36 @@ class DesktopApp:
 
         self.start_server()
         self._start_tracking()
+        # This must run before WebView2 creates its HWND so Windows associates
+        # the native window and taskbar entry with File Memory's identity.
+        set_windows_app_user_model_id()
+        hide_on_ready = should_start_hidden(
+            start_minimized, is_setup_complete(self.service)
+        )
         try:
+            self._start_tray()
             self.window = webview.create_window(
                 url=self.url,
-                **window_options(start_minimized),
+                # Tray minimization is a hide operation, not a minimized
+                # taskbar button.  This keeps the dashboard out of the taskbar
+                # while preserving the running watcher/service process.
+                **window_options(False),
             )
             self.window.events.loaded += self._on_page_loaded
             self.window.events.closed += self._close
             # pywebview does not expose an icon argument. Apply the ICO after
             # the native window exists; the delayed retry handles WebView2's
             # asynchronous HWND creation.
+            def on_gui_ready() -> None:
+                apply_windows_icon()
+                if hide_on_ready:
+                    self._hide_dashboard()
+
             threading.Timer(0.8, apply_windows_icon).start()
             # edgechromium is pywebview's Microsoft Edge WebView2 backend on
             # Windows.  The runtime is intentionally supplied by Windows and
             # is not bundled into the PyInstaller artifact.
-            webview.start(gui="edgechromium", debug=False)
+            webview.start(gui="edgechromium", debug=False, func=on_gui_ready)
         finally:
             self._close()
 

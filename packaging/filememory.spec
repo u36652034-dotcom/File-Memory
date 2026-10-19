@@ -45,6 +45,11 @@ except ImportError:
     # Runtime packaging installs pywebview from requirements-packaging.lock.
     # This fallback keeps static spec inspection possible on a non-Windows host.
     pass
+try:
+    hiddenimports += collect_submodules("pystray")
+except ImportError:
+    # Runtime packaging installs pystray from requirements-packaging.lock.
+    pass
 
 with_models = os.environ.get("FILE_MEMORY_INCLUDE_MODELS") == "1"
 excludes = [] if with_models else [

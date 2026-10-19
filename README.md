@@ -108,15 +108,23 @@ python -m pip install -r requirements-packaging.lock
 .\.venv\Scripts\python.exe -m filememory.desktop
 ```
 
-The embedded app supports the same keyword/semantic search, safe
-open-file/open-folder and copy-path actions, editable pending notes,
-watched-folder management, AI mode, and tracking controls as the local web
-app. New watcher events use the web UI's non-blocking toast and auto-hide after
-eight seconds. To preserve the startup shortcut behavior, pass `--minimized`:
+The embedded app registers the custom FM grid icon in the Windows notification
+area and offers **Show dashboard**, **Hide dashboard**, **Pause/Resume
+tracking**, and **Exit** tray actions. Hiding the dashboard leaves the local
+API and filesystem watcher running; only **Exit** or closing the dashboard
+stops them. It supports the same keyword/semantic search, safe open-file/open-
+folder and copy-path actions, editable pending notes, watched-folder
+management, AI mode, and tracking controls as the local web app. New watcher
+events use the web UI's non-blocking toast and auto-hide after eight seconds.
+To preserve the startup shortcut behavior, pass `--minimized`:
 
 ```powershell
 .\.venv\Scripts\python.exe -m filememory.desktop --minimized
 ```
+
+After a watched folder has been selected, `--minimized` hides the dashboard to
+the notification area after startup. On a first run it still shows the
+dashboard so setup can be completed.
 
 Windows must have the Microsoft Edge WebView2 Runtime installed. pywebview and
 the PyInstaller package do not bundle that runtime; the Evergreen WebView2
@@ -216,8 +224,9 @@ the model runtime so the embedded web UI can use the optional local model after
 installation. The application stores its database and model cache in the
 user's application-data directory by default.
 
-The native shell and packaged executable use the custom blue/lime FM grid icon
-in `assets\filememory.ico`. The dashboard footer credits **Vibecoded by Osman
+The native shell, packaged executable, taskbar identity, and notification-area
+icon use the custom blue/lime FM grid icon in `assets\filememory.ico`. The
+dashboard footer credits **Vibecoded by Osman
 ♥ · with OmniRush ♥**.
 
 ### Per-user installer
@@ -247,3 +256,46 @@ request or require administrator-only Windows permissions.
 `ISCC.exe` is an external Inno Setup tool and is not installed by the project
 scripts. If it is unavailable, `build_installer.ps1` stops with an actionable
 message; PyInstaller artifacts can still be built and validated independently.
+
+## Windows desktop behavior
+
+The installed app is a native WebView2 desktop shell around the existing File
+Memory interface; it does not open a normal browser tab.
+
+### Startup and tray
+
+1. The first launch opens the dashboard so setup can be completed.
+2. Setup asks for a watched folder, verifies the required `all-MiniLM-L6-v2`
+   embedding model, and lets the user choose Local AI (SmolLM2) or Groq for
+   note suggestions.
+3. After setup, the optional Startup shortcut launches File Memory hidden from
+   the main taskbar and keeps it in the Windows notification area.
+4. The tray menu provides **Show dashboard**, **Hide dashboard**, **Pause/Resume
+   tracking**, and **Exit**. Windows may place the icon inside its overflow
+   arrow according to the user's taskbar settings.
+5. Hiding the dashboard does not stop SQLite, the event watcher, or the local
+   API. Closing from the tray exits all of them.
+
+### New-file notification flow
+
+1. A selected folder emits a filesystem event; the app does not poll.
+2. The watcher ignores incomplete download suffixes and waits for the file to
+   become stable.
+3. File Memory creates a short draft from the filename/snippet using the
+   selected provider. Local AI and Groq are optional; the offline heuristic is
+   the safe fallback.
+4. A small in-app prompt appears above the lower-right edge of the dashboard,
+   with the filename, editable note, **Remember**, and **Dismiss**.
+5. The prompt disappears automatically after eight seconds. Remember persists
+   the edited note in SQLite; Dismiss leaves the draft available in the
+   dashboard's suggestions section.
+
+### Dashboard layout
+
+The standard window is approximately 1200×820 and uses the supplied indigo,
+lime, and FM icon language. It has a flexible split layout: the left side is
+the memory introduction and watched-folder summary; the right side contains
+search, meaning/exact-word controls, ranked results, and note suggestions.
+Maximizing the window expands the grid and type; only long result lists scroll.
+The WebView2 shell keeps the same UI code as the earlier web preview, so the
+desktop and browser fallback remain behaviorally aligned.

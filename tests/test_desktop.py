@@ -2,7 +2,16 @@ import json
 from urllib.request import urlopen
 
 from filememory.db import Database
-from filememory.desktop import DesktopApp, notification_script, window_options
+from filememory.desktop import (
+    APP_USER_MODEL_ID,
+    DesktopApp,
+    is_setup_complete,
+    notification_script,
+    set_windows_app_user_model_id,
+    should_start_hidden,
+    tray_menu_labels,
+    window_options,
+)
 from filememory.embeddings import EmbeddingProvider
 from filememory.service import FileMemoryService
 
@@ -42,6 +51,31 @@ def test_desktop_window_configuration_preserves_minimized_startup():
     assert options["minimized"] is True
     assert options["title"] == "File Memory"
     assert options["min_size"] == (900, 620)
+
+
+def test_startup_identity_and_tray_minimized_decision_are_display_free(tmp_path):
+    service = FileMemoryService(Database(tmp_path / "memory.sqlite3"))
+    assert APP_USER_MODEL_ID == "FileMemory.Desktop"
+    assert isinstance(set_windows_app_user_model_id(), bool)
+    assert is_setup_complete(service) is False
+    assert should_start_hidden(True, False) is False
+    assert should_start_hidden(False, True) is False
+    assert should_start_hidden(True, True) is True
+
+    watched = tmp_path / "watched"
+    watched.mkdir()
+    service.database.add_folder(watched)
+    assert is_setup_complete(service) is True
+
+
+def test_tray_menu_exposes_dashboard_tracking_and_exit_actions():
+    assert tray_menu_labels(False) == (
+        "Show dashboard",
+        "Hide dashboard",
+        "Pause tracking",
+        "Exit",
+    )
+    assert tray_menu_labels(True)[2] == "Resume tracking"
 
 
 def test_native_notification_uses_existing_non_blocking_toast_for_eight_seconds():
