@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -21,7 +22,10 @@ def open_file(path: str | Path) -> str:
     elif sys.platform == "darwin":
         subprocess.Popen(["open", str(candidate)])
     else:
-        subprocess.Popen(["xdg-open", str(candidate)])
+        opener = shutil.which("xdg-open")
+        if not opener:
+            raise ActionError("No desktop file opener is available (xdg-open was not found).")
+        subprocess.Popen([opener, str(candidate)])
     return str(candidate)
 
 
@@ -34,5 +38,8 @@ def open_folder(path: str | Path) -> str:
     elif sys.platform == "darwin":
         subprocess.Popen(["open", str(candidate)])
     else:
-        subprocess.Popen(["xdg-open", str(candidate)])
+        opener = shutil.which("xdg-open")
+        if not opener:
+            raise ActionError("No desktop folder opener is available (xdg-open was not found).")
+        subprocess.Popen([opener, str(candidate)])
     return str(candidate)

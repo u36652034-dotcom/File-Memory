@@ -92,6 +92,19 @@ h1 em { color: var(--lime); font-style: normal; }
 .state-error .state-icon { background: var(--ink); color: var(--lime); }
 .dark-button { margin-top: 20px; padding: 11px 16px; border: 0; background: var(--ink); color: var(--lime); font-family: var(--display); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 .results-list { display: grid; gap: 20px; }
+.suggestions-region { margin-top: 55px; }
+.suggestions-heading-row { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin: 16px 0 22px; }
+.suggestions-heading-row h2 { margin: 0; color: var(--paper); font-family: var(--display); font-size: clamp(32px, 4vw, 48px); line-height: .88; text-transform: uppercase; }
+.suggestions-heading-row h2 strong { color: var(--lime); font-weight: inherit; }
+.suggestions-heading-row p { max-width: 280px; margin: 0; color: var(--lavender); font-size: 13px; font-weight: 700; line-height: 1.35; }
+.suggestions-list { display: grid; gap: 17px; }
+.suggestion-card { padding: 18px; border: var(--line); background: var(--paper); color: var(--ink); box-shadow: 5px 5px 0 var(--lime); }
+.suggestion-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
+.suggestion-name { margin: 0; overflow-wrap: anywhere; font-family: var(--display); font-size: 22px; line-height: .95; text-transform: uppercase; }
+.suggestion-path { margin: 6px 0 0; overflow-wrap: anywhere; color: #5d5878; font-size: 11px; font-weight: 700; }
+.suggestion-provider { flex: 0 0 auto; padding: 5px 7px; background: var(--lime); font-family: var(--display); font-size: 10px; text-transform: uppercase; }
+.suggestion-note { display: block; width: 100%; min-height: 75px; margin: 16px 0 11px; padding: 10px; resize: vertical; border: 2px solid var(--ink); background: #fff; color: var(--ink); font: 700 14px/1.35 var(--body); }
+.suggestion-confirm { margin-top: 0; }
 .result-card { position: relative; padding: 22px 22px 18px; border: var(--line); background: var(--paper); color: var(--ink); box-shadow: 5px 5px 0 var(--ink); }
 .result-card:nth-child(odd) { transform: rotate(-.55deg); }
 .result-card:nth-child(even) { transform: rotate(.55deg); }
@@ -173,6 +186,8 @@ h1 em { color: var(--lime); font-style: normal; }
   .search-options { gap: 6px; }
   .option-label { width: 100%; }
   .results-region { margin-top: 28px; }
+  .suggestions-heading-row { display: block; }
+  .suggestions-heading-row p { margin-top: 13px; }
   .result-card { padding: 17px 14px 15px; }
   .result-top { gap: 8px; }
   .result-score { padding: 5px; font-size: 10px; }

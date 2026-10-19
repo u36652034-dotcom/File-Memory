@@ -45,9 +45,13 @@
     forgetFile(path) {
       return request("/api/files/forget", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ path: path, confirmed: true }) });
     },
-    addFolder(path) {
-      return request("/api/folders", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ path: path }) });
-    },
+     addFolder(path) {
+       return request("/api/folders", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ path: path }) });
+     },
+     suggestions() { return request("/api/suggestions"); },
+     confirmSuggestion(id, note) {
+       return request("/api/suggestions/confirm", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ id: id, note: note }) });
+     },
     removeFolder(path) {
       return request("/api/folders?path=" + encodeURIComponent(path) + "&confirmed=true", { method: "DELETE" });
     },
@@ -130,10 +134,10 @@
       card.querySelector(".date-value").textContent = date;
       card.querySelector(".match-value").textContent = matchType;
       card.querySelector(".open-file").addEventListener("click", function () { runAction(api.openFile, path, "File opened."); });
-      card.querySelector(".open-folder").addEventListener("click", function () {
-        const folder = path.replace(/[\\/][^\\/]*$/, "") || path;
-        runAction(api.openFolder, folder, "Folder opened.");
-      });
+       card.querySelector(".open-folder").addEventListener("click", function () {
+         const folder = String(value(record, ["parent_path"], "")) || path;
+         runAction(api.openFolder, folder, "Folder opened.");
+       });
        card.querySelector(".copy-path").addEventListener("click", function () { copyPath(path); });
        card.querySelector(".forget-file").addEventListener("click", async function () {
          if (!window.confirm("Forget this indexed file? The real file will not be deleted.")) return;
@@ -171,6 +175,46 @@
   }
 
   function updateFolderCount() { folderCount.textContent = String(state.folders.length); }
+
+  function renderSuggestions(payload) {
+    const suggestions = asArray(payload, ["suggestions", "items", "data"]);
+    const region = $("#suggestions-region");
+    const list = $("#suggestions-list");
+    region.hidden = !suggestions.length;
+    list.replaceChildren(...suggestions.map(function (suggestion) {
+      const card = document.createElement("article");
+      card.className = "suggestion-card";
+      const filename = String(value(suggestion, ["filename"], "Unnamed file"));
+      const path = String(value(suggestion, ["path"], ""));
+      card.innerHTML = "<div class=\"suggestion-top\"><div><h3 class=\"suggestion-name\"></h3><p class=\"suggestion-path\"></p></div><span class=\"suggestion-provider\"></span></div>" +
+        "<label class=\"sr-only suggestion-label\" for=\"suggestion-note-" + suggestion.id + "\"></label>" +
+        "<textarea class=\"suggestion-note\" id=\"suggestion-note-" + suggestion.id + "\" rows=\"3\"></textarea>" +
+        "<button class=\"dark-button suggestion-confirm\" type=\"button\">Save note</button>";
+      card.querySelector(".suggestion-name").textContent = filename;
+      card.querySelector(".suggestion-path").textContent = path;
+      card.querySelector(".suggestion-provider").textContent = String(value(suggestion, ["provider"], "offline"));
+      card.querySelector(".suggestion-label").textContent = "Note for " + filename;
+      card.querySelector(".suggestion-note").value = String(value(suggestion, ["suggested_note"], ""));
+      card.querySelector(".suggestion-confirm").addEventListener("click", async function (event) {
+        const note = card.querySelector(".suggestion-note").value.trim();
+        if (!note) { showToast("Add a note before saving.", true); return; }
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+          await api.confirmSuggestion(suggestion.id, note);
+          card.remove();
+          if (!list.children.length) region.hidden = true;
+          showToast("Note saved to memory.", false);
+        } catch (error) { button.disabled = false; showToast(error.message, true); }
+      });
+      return card;
+    }));
+  }
+
+  async function loadSuggestions() {
+    try { renderSuggestions(await api.suggestions()); }
+    catch (error) { /* Suggestions are secondary to the search surface. */ }
+  }
 
   function renderFolders() {
     const list = $("#folders-list");
@@ -265,11 +309,19 @@
     const folderInput = $("#folder-input"); const path = folderInput.value.trim();
     if (!path) return;
     const submit = event.currentTarget.querySelector(".submit-button"); submit.disabled = true; setFolderMessage("Adding folder…");
-    try { const added = await api.addFolder(path); state.folders = state.folders.concat([added && added.path ? added : { path: path }]); renderFolders(); updateFolderCount(); folderInput.value = ""; setFolderMessage("Folder added."); }
+     try {
+       const added = await api.addFolder(path);
+       state.folders = state.folders.concat([added && added.path ? added : { path: path }]);
+       renderFolders(); updateFolderCount(); folderInput.value = "";
+       const indexing = added && added.indexing;
+       setFolderMessage(indexing ? "Folder added. Indexed " + indexing.indexed + " existing file(s); " + indexing.skipped + " skipped." : "Folder added.");
+       loadSuggestions();
+     }
     catch (error) { setFolderMessage("API unavailable: " + error.message, true); }
     finally { submit.disabled = false; }
   });
 
   loadFolders();
   loadSettings();
+  loadSuggestions();
 }());

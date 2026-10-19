@@ -7,12 +7,14 @@ standard library so the same surface can later be hosted by a desktop shell.
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .db import Database
+from .paths import load_dotenv
 from .service import ConfirmationRequired, FileMemoryService
 
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
@@ -59,12 +61,16 @@ def create_server(service: FileMemoryService, host: str = "127.0.0.1", port: int
                         "settings": service.get_settings(),
                         "folders": service.list_folders(),
                         "files": service.list_files(),
+                        "suggestions": service.list_pending_suggestions(),
                         "tracking_active": service.tracking_active(),
+                        "tracking_error": service.tracking_error,
                     })
                 elif parsed.path == "/api/folders":
                     self._send(200, {"folders": service.list_folders()})
                 elif parsed.path == "/api/settings":
                     self._send(200, service.get_settings())
+                elif parsed.path == "/api/suggestions":
+                    self._send(200, {"suggestions": service.list_pending_suggestions()})
                 elif parsed.path == "/api/search":
                     query = parse_qs(parsed.query).get("q", [""])[0]
                     semantic = parse_qs(parsed.query).get("semantic", ["true"])[0].lower() not in ("false", "0", "no")
@@ -83,6 +89,16 @@ def create_server(service: FileMemoryService, host: str = "127.0.0.1", port: int
                     result = {"removed": service.remove_folder(str(payload["path"]), bool(payload.get("confirmed")))}
                 elif self.path == "/api/settings":
                     result = service.update_settings(**payload)
+                elif self.path == "/api/suggestions/confirm":
+                    suggestion_id = payload.get("id", payload.get("suggestion_id"))
+                    if suggestion_id is None:
+                        raise ValueError("suggestion id is required")
+                    result = {"file": service.confirm_suggestion(suggestion_id, payload.get("note"))}
+                elif self.path.startswith("/api/suggestions/") and self.path.endswith("/confirm"):
+                    suggestion_id = self.path[len("/api/suggestions/") : -len("/confirm")].strip("/")
+                    if not suggestion_id.isdigit():
+                        raise ValueError("suggestion id must be an integer")
+                    result = {"file": service.confirm_suggestion(suggestion_id, payload.get("note"))}
                 elif self.path == "/api/rebuild":
                     result = service.rebuild_search_index()
                 elif self.path == "/api/files/forget":
@@ -126,12 +142,21 @@ def create_server(service: FileMemoryService, host: str = "127.0.0.1", port: int
     return ThreadingHTTPServer((host, port), Handler)
 
 
-def serve(database: str = "filememory.sqlite3", host: str = "127.0.0.1", port: int = 8765) -> None:
+def serve(database: str | None = None, host: str | None = None, port: int | None = None) -> None:
+    load_dotenv()
+    database = database or os.getenv("FILE_MEMORY_DATABASE")
+    host = host or os.getenv("FILE_MEMORY_HOST", "127.0.0.1")
+    port = port or int(os.getenv("FILE_MEMORY_PORT", "8765"))
     service = FileMemoryService(database=Database(database))
     server = create_server(service, host, port)
     # The desktop entry point owns the event watcher lifecycle. Direct service
     # users can opt into the same behavior with start_tracking().
-    service.start_tracking()
+    try:
+        service.start_tracking()
+    except Exception as error:
+        # The UI remains usable for keyword search and manual indexing when a
+        # project-local optional dependency has not been installed yet.
+        print(f"Warning: filesystem tracking is unavailable: {error}")
     print(f"File Memory running locally at http://{host}:{port}")
     try:
         server.serve_forever()

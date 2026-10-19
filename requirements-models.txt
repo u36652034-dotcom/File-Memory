@@ -1,0 +1,5 @@
+# Optional local model runtime. The base app remains fully usable offline
+# without these packages through SQLite keyword search and offline notes.
+sentence-transformers==5.1.2
+transformers==4.57.1
+torch==2.8.0

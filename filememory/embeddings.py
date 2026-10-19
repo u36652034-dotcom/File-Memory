@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from typing import Any, Callable
+
+from .paths import load_dotenv, model_cache_dir
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 
@@ -21,11 +24,16 @@ class EmbeddingProvider:
             return self._model
         self._attempted = True
         try:
+            load_dotenv()
             if self._loader:
                 self._model = self._loader(self.model_name)
             else:
                 from sentence_transformers import SentenceTransformer  # type: ignore
-                self._model = SentenceTransformer(self.model_name)
+                self._model = SentenceTransformer(
+                    self.model_name,
+                    cache_folder=str(model_cache_dir()),
+                    local_files_only=os.getenv("FILE_MEMORY_OFFLINE_MODE", "1") == "1",
+                )
         except Exception:
             self._model = None
         return self._model

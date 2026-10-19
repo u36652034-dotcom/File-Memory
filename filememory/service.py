@@ -29,9 +29,15 @@ class FileMemoryService:
         self.local_suggestions = SmolLM2SuggestionProvider()
         self.groq_suggestions = GroqSuggestionProvider()
         self._watcher = None
+        self.tracking_error: str | None = None
 
     def add_folder(self, path: str) -> dict[str, Any]:
+        candidate = Path(path).expanduser().resolve(strict=False)
+        if not candidate.is_dir():
+            raise ValueError("watched folder must exist and be a directory")
         folder = self.database.add_folder(path)
+        indexing = self._index_folder(folder["path"])
+        folder["indexing"] = indexing
         # If event tracking is already running, include newly selected folders
         # without requiring the caller to restart the process.
         if self.tracking_active():
@@ -55,6 +61,7 @@ class FileMemoryService:
 
     def update_settings(self, **updates: Any) -> dict[str, Any]:
         current = self.get_settings()
+        was_paused = bool(current.get("tracking_paused"))
         if "tracking_paused" in updates:
             if not isinstance(updates["tracking_paused"], bool):
                 raise ValueError("tracking_paused must be a boolean")
@@ -82,6 +89,8 @@ class FileMemoryService:
             self.database.set_setting(key, value)
         if current["tracking_paused"]:
             self.stop_tracking()
+        elif was_paused and not self.tracking_active():
+            self.start_tracking()
         return current
 
     def is_tracking_paused(self) -> bool:
@@ -100,15 +109,75 @@ class FileMemoryService:
         ignored = self.get_settings().get("ignored_extensions", [])
         if any(candidate.name.lower().endswith(extension) for extension in ignored):
             return IndexResult("skipped-ignored-type", str(candidate.resolve()))
-        return self.indexer.index_path(path, note)
+        previous = self.database.get_file(candidate)
+        result = self.indexer.index_path(path, note)
+        if result.status != "indexed" or result.record is None:
+            return result
+        if note is not None:
+            # An explicit note supersedes a suggestion that may still be open.
+            self.database.clear_pending_suggestion(candidate)
+        elif previous is None and not result.record.get("note"):
+            suggested_note, provider = self._suggest_note_details(
+                result.record["filename"], result.record.get("snippet", "")
+            )
+            if suggested_note.strip():
+                self.database.add_pending_suggestion(
+                    result.record["id"], candidate, suggested_note.strip(), provider
+                )
+        return result
+
+    def _index_folder(self, path: str) -> dict[str, Any]:
+        """Index files present during explicit onboarding, without polling."""
+        summary: dict[str, Any] = {"indexed": 0, "skipped": 0, "total": 0}
+        root = Path(path)
+        if not root.is_dir():
+            summary["status"] = "folder-not-found"
+            return summary
+        for candidate in root.rglob("*"):
+            if not candidate.is_file():
+                continue
+            database_path = Path(self.database.path)
+            if database_path.name != ":memory:" and candidate.resolve() == database_path.resolve():
+                continue
+            summary["total"] += 1
+            result = self._index_path(candidate, None, respect_pause=False)
+            if result.status == "indexed":
+                summary["indexed"] += 1
+            else:
+                summary["skipped"] += 1
+        return summary
 
     def suggest_note(self, filename: str, snippet: str = "") -> str:
+        return self._suggest_note_details(filename, snippet)[0]
+
+    def _suggest_note_details(self, filename: str, snippet: str = "") -> tuple[str, str]:
         mode = self.get_settings().get("ai_mode", "no_ai")
         if mode == "local_ai":
-            return self.local_suggestions.suggest(filename, snippet) or self.offline_suggestions.suggest(filename, snippet)
+            suggestion = self.local_suggestions.suggest(filename, snippet)
+            if suggestion and suggestion.strip():
+                return suggestion.strip(), "local_ai"
+            return self.offline_suggestions.suggest(filename, snippet), "offline"
         if mode == "groq":
-            return self.groq_suggestions.suggest(filename, snippet) or self.offline_suggestions.suggest(filename, snippet)
-        return self.offline_suggestions.suggest(filename, snippet)
+            suggestion = self.groq_suggestions.suggest(filename, snippet)
+            if suggestion and suggestion.strip():
+                return suggestion.strip(), "groq"
+            return self.offline_suggestions.suggest(filename, snippet), "offline"
+        return self.offline_suggestions.suggest(filename, snippet), "offline"
+
+    def list_pending_suggestions(self) -> list[dict[str, Any]]:
+        return self.database.list_pending_suggestions()
+
+    def confirm_suggestion(self, suggestion_id: int, note: str | None = None) -> dict[str, Any]:
+        suggestion = self.database.get_pending_suggestion(int(suggestion_id))
+        if suggestion is None:
+            raise ValueError("Pending suggestion not found")
+        final_note = suggestion["suggested_note"] if note is None else str(note).strip()
+        if not final_note:
+            raise ValueError("note must not be empty")
+        record = self.database.confirm_pending_suggestion(int(suggestion_id), final_note)
+        if record is None:
+            raise ValueError("Pending suggestion not found")
+        return self._without_embedding(record)
 
     def list_files(self) -> list[dict[str, Any]]:
         """Return inbox-safe records without embedding payloads."""
@@ -118,6 +187,8 @@ class FileMemoryService:
     def _without_embedding(record: dict[str, Any]) -> dict[str, Any]:
         public_record = dict(record)
         public_record.pop("embedding_json", None)
+        if public_record.get("path"):
+            public_record["parent_path"] = str(Path(public_record["path"]).parent)
         return public_record
 
     def forget_file(self, path: str, confirmed: bool = False) -> bool:
@@ -154,10 +225,18 @@ class FileMemoryService:
         from .watcher import FolderWatcher
 
         self.stop_tracking()
-        self._watcher = FolderWatcher(
-            [folder["path"] for folder in self.list_folders()], self.index_path
-        )
-        self._watcher.start()
+        folders = [folder["path"] for folder in self.list_folders() if Path(folder["path"]).is_dir()]
+        if not folders:
+            return
+        watcher = FolderWatcher(folders, self.index_path)
+        try:
+            watcher.start()
+        except Exception as error:
+            watcher.stop()
+            self.tracking_error = str(error)
+            raise
+        self._watcher = watcher
+        self.tracking_error = None
 
     def stop_tracking(self) -> None:
         if self._watcher is not None:

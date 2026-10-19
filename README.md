@@ -1,15 +1,30 @@
-# File Memory backend
+# File Memory
 
-Local-first Python 3.12 backend for indexing explicitly selected folders and
+Local-first Python 3.12 app for indexing explicitly selected folders and
 searching file names, notes, and short text snippets. SQLite is the only
 required storage system. Semantic embeddings, local language-model suggestions,
 Groq suggestions, and filesystem watching are optional integrations loaded only
 when used.
 
-## Setup
+## Setup (Windows)
 
 Python 3.12 is pinned in `.python-version`. Create an environment inside the
 project and install the pinned lock file:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.lock
+```
+
+If PowerShell blocks activation, run the project interpreter directly:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.lock
+.\.venv\Scripts\python.exe -m filememory.web
+```
+
+## Setup (Linux)
 
 ```bash
 python3.12 -m venv .venv
@@ -18,23 +33,48 @@ python -m pip install -r requirements.lock
 ```
 
 The runtime dependency is `watchdog`; the test dependency is `pytest`. The
-optional `sentence-transformers` and `transformers` integrations are intentionally
-not installed by default because they download large model packages. If enabled
-by an application, models are loaded lazily and failures fall back safely.
+base app has no model dependency and remains fully offline through SQLite
+keyword search and deterministic note suggestions. Install the optional local
+model runtime into the same project environment when you want semantic search
+and SmolLM2 note suggestions:
 
-Copy `.env.example` to `.env` only when configuring the optional Groq provider.
+```powershell
+# Windows
+.\.venv\Scripts\python.exe -m pip install -r requirements-models.txt
+.\.venv\Scripts\python.exe scripts\prepare_models.py
+```
+
+```bash
+# Linux
+.venv/bin/python -m pip install -r requirements-models.txt
+.venv/bin/python scripts/prepare_models.py
+```
+
+For reproducible installs, replace `requirements-models.txt` with
+`requirements-models.lock` in the commands above. The preparation script
+downloads `all-MiniLM-L6-v2` and
+`HuggingFaceTB/SmolLM2-360M-Instruct` into `.models/`, which is ignored by
+Git. Set `FILE_MEMORY_OFFLINE_MODE=1` after preparation to prevent later model
+loads from attempting network access. If a model is unavailable, the app
+continues with keyword search or the offline note provider.
+
+Copy `.env.example` to `.env` when configuring the optional Groq provider or
+project-local model cache. The app loads this file without an extra dependency.
 Never commit credentials.
 
 ## Run the local inbox and settings screen
 
-Start the loopback-only app with the standard library HTTP server:
+Start the loopback-only app with the standard library HTTP server from the
+project environment:
 
 ```bash
 python -m filememory.web
 ```
 
 Open <http://127.0.0.1:8765/>. The Inbox searches indexed files and provides
-safe open and forget actions. Settings lets you add/remove watched folder
+safe open and forget actions. Newly indexed files appear as pending note
+suggestions; edit or confirm a suggestion in the Inbox before it is saved to
+the file's note. Settings lets you add/remove watched folder
 paths, pause tracking, choose **No AI** (default), **Local AI**, or **Groq**,
 ignore extensions, and rebuild the search index. Folder removal and forgetting
 an indexed file require a browser confirmation; forgetting never deletes the
@@ -42,7 +82,16 @@ real file.
 
 All API routes bind to `127.0.0.1` by default. The UI has no external assets or
 network calls. When Groq is selected, only the optional note suggestion call
-uses the configured Groq endpoint.
+uses the configured Groq endpoint. Adding a watched folder explicitly scans
+files already present and returns an `indexed`/`skipped`/`total` summary; it
+does not start a polling loop. Watchdog handles later changes through
+filesystem events.
+
+The database defaults to the platform application-data directory. Override it
+with `FILE_MEMORY_DATABASE` when you need a portable project-local file. If a
+system Python is used without installing `requirements.lock`, the UI can still
+start but it will display a filesystem-tracking warning; use the project-local
+interpreter above to enable event watching.
 
 ## Python service API
 
@@ -66,16 +115,21 @@ explicit scan of selected folders plus an FTS rebuild. `forget_file` and
 Use `start_tracking()` and `stop_tracking()` with the folders returned by
 `list_folders()` to receive watchdog create/modify/move events. Events are
 indexed only after a file is stable; incomplete download suffixes are skipped.
+`list_pending_suggestions()` exposes drafts, and `confirm_suggestion(id, note)`
+persists an edited or unchanged note. The loopback API mirrors these operations
+at `GET /api/suggestions` and `POST /api/suggestions/confirm`.
 `open_file` and `open_folder` use argument arrays (never a shell) and reject
 missing paths.
 
-## Test
+## Test (Windows and Linux)
 
 The one offline test command is:
 
 ```bash
-make test
+python -m pytest -q
 ```
+
+`make test` is also available as a Unix convenience wrapper.
 
 Tests use temporary SQLite databases and fake embedding providers. They never
 download models or call the network.

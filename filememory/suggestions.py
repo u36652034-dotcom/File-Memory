@@ -7,6 +7,8 @@ import os
 import urllib.request
 from typing import Any, Callable
 
+from .paths import load_dotenv, model_cache_dir
+
 
 class OfflineSuggestionProvider:
     def suggest(self, filename: str, snippet: str = "") -> str:
@@ -19,6 +21,7 @@ class OfflineSuggestionProvider:
 
 class SmolLM2SuggestionProvider:
     def __init__(self, loader: Callable[[str], Any] | None = None) -> None:
+        load_dotenv()
         self.loader = loader
         self._pipeline: Any = None
         self._attempted = False
@@ -30,22 +33,54 @@ class SmolLM2SuggestionProvider:
                 if self.loader:
                     self._pipeline = self.loader()
                 else:
-                    from transformers import pipeline  # type: ignore
-                    self._pipeline = pipeline("text-generation", model="HuggingFaceTB/SmolLM2-360M-Instruct")
+                    from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline  # type: ignore
+                    model_name = "HuggingFaceTB/SmolLM2-360M-Instruct"
+                    cache_dir = str(model_cache_dir())
+                    offline = os.getenv("FILE_MEMORY_OFFLINE_MODE", "1") == "1"
+                    tokenizer = AutoTokenizer.from_pretrained(
+                        model_name, cache_dir=cache_dir, local_files_only=offline
+                    )
+                    model = AutoModelForCausalLM.from_pretrained(
+                        model_name, cache_dir=cache_dir, local_files_only=offline
+                    )
+                    self._pipeline = pipeline(
+                        "text-generation",
+                        model=model,
+                        tokenizer=tokenizer,
+                    )
             except Exception:
                 self._pipeline = None
         if self._pipeline is None:
             return None
         try:
-            prompt = f"Write a short note for {filename}. Context: {snippet[:500]}"
-            result = self._pipeline(prompt, max_new_tokens=48, do_sample=False)
-            return str(result[0]["generated_text"])[len(prompt):].strip()
+            instruction = (
+                "Write one short plain-English note describing what this file is for. "
+                "Return only the note, with no bullets or preamble.\n"
+                f"Filename: {filename}\nContext: {snippet[:500]}"
+            )
+            tokenizer = getattr(self._pipeline, "tokenizer", None)
+            prompt = instruction
+            if tokenizer is not None and getattr(tokenizer, "chat_template", None):
+                prompt = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": instruction}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+            result = self._pipeline(
+                prompt,
+                max_new_tokens=48,
+                do_sample=False,
+                return_full_text=False,
+            )
+            generated = str(result[0]["generated_text"]).strip()
+            return generated.splitlines()[0].strip(" -*")[:180] if generated else None
         except Exception:
             return None
 
 
 class GroqSuggestionProvider:
     def __init__(self, api_key: str | None = None, url: str | None = None) -> None:
+        load_dotenv()
         self.api_key = api_key or os.getenv("GROQ_API_KEY")
         self.url = url or os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1/chat/completions")
         self.model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
