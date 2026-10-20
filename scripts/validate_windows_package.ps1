@@ -11,7 +11,7 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $dist = Join-Path $root "dist"
 
 function Assert-Artifact {
-    param([string]$Path)
+    param([string]$Path, [switch]$AllowInstallerBootstrapper)
     if (-not (Test-Path $Path -PathType Leaf)) { throw "Missing artifact: $Path" }
     $bytes = [System.IO.File]::ReadAllBytes($Path)
     if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
@@ -22,7 +22,9 @@ function Assert-Artifact {
     $signature = [Text.Encoding]::ASCII.GetString($bytes, $peOffset, 4)
     if ($signature -ne "PE`0`0") { throw "Invalid PE signature: $Path" }
     $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
-    if ($machine -ne 0x8664) { throw "Expected x64 PE (0x8664), found 0x$('{0:X4}' -f $machine): $Path" }
+    if ($machine -ne 0x8664 -and -not ($AllowInstallerBootstrapper -and $machine -eq 0x014C)) {
+        throw "Expected x64 PE (0x8664), found 0x$('{0:X4}' -f $machine): $Path"
+    }
     Write-Host "Validated x64 PE: $Path"
 }
 
@@ -64,7 +66,9 @@ if ($Mode -in @("onefile", "both")) {
     if ($SmokeTest) { Invoke-SmokeTest $onefileExe $dist }
 }
 if ($RequireInstaller) {
-    Assert-Artifact (Join-Path $dist "FileMemory-Setup.exe")
+    # Inno Setup's launcher is commonly a 32-bit PE even when it installs an
+    # x64 application; the packaged FileMemory.exe above is the x64 payload.
+    Assert-Artifact (Join-Path $dist "FileMemory-Setup.exe") -AllowInstallerBootstrapper
 }
 
 Write-Host "File Memory Windows package validation passed."

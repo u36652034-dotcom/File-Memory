@@ -15,7 +15,18 @@ if ($LASTEXITCODE -ne 0) { throw "Installer artwork generation failed." }
 
 $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 if ($null -eq $iscc) {
-    throw "Inno Setup Compiler (ISCC.exe) was not found. Install Inno Setup on Windows, then rerun scripts\build_installer.ps1. No global Python install is required."
+    $knownPaths = @(
+        (Join-Path ${env:ProgramFiles} "Inno Setup 7\ISCC.exe"),
+        (Join-Path ${env:ProgramFiles} "Inno Setup 6\ISCC.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 7\ISCC.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
+    )
+    $known = $knownPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($null -ne $known) {
+        $iscc = @{ Source = $known }
+    } else {
+        throw "Inno Setup Compiler (ISCC.exe) was not found. Install Inno Setup on Windows, then rerun scripts\build_installer.ps1. No global Python install is required."
+    }
 }
 
 & $iscc.Source (Join-Path $root "installer\FileMemory.iss")
