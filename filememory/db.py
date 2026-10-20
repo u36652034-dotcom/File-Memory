@@ -187,6 +187,15 @@ class Database:
             connection.execute("DELETE FROM search_cache")
         return result.rowcount > 0
 
+    def clear_all_files(self) -> int:
+        """Forget every indexed record and draft, without touching real files."""
+        with self.connection() as connection:
+            row = connection.execute("SELECT COUNT(*) FROM files").fetchone()
+            connection.execute("DELETE FROM pending_suggestions")
+            connection.execute("DELETE FROM files")
+            connection.execute("DELETE FROM search_cache")
+        return int(row[0])
+
     def rebuild_search_index(self) -> int:
         with self.connection() as connection:
             connection.execute("INSERT INTO files_fts(files_fts) VALUES ('rebuild')")
@@ -318,6 +327,21 @@ class Database:
                 "SELECT * FROM files WHERE id = ?", (suggestion[0],)
             ).fetchone()
         return dict(row)
+
+    def confirm_all_pending_suggestions(self) -> int:
+        """Save every pending draft as-is and remove its pending state."""
+        with self.connection() as connection:
+            rows = connection.execute(
+                "SELECT file_id, suggested_note FROM pending_suggestions"
+            ).fetchall()
+            for row in rows:
+                connection.execute(
+                    "UPDATE files SET note = ? WHERE id = ?",
+                    (row["suggested_note"], row["file_id"]),
+                )
+            connection.execute("DELETE FROM pending_suggestions")
+            connection.execute("DELETE FROM search_cache")
+        return len(rows)
 
     def keyword_search(self, query: str, limit: int) -> list[dict[str, Any]]:
         terms = re.findall(r"[\w-]+", query, flags=re.UNICODE)

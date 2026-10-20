@@ -49,7 +49,19 @@
      addFolder(path) {
        return request("/api/folders", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ path: path }) });
      },
-     suggestions() { return request("/api/suggestions"); },
+      previewFolder(path) {
+        return request("/api/folders/preview", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ path: path }) });
+      },
+      prepareModels(provider) {
+        return request("/api/models/prepare", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ provider: provider }) });
+      },
+      suggestions() { return request("/api/suggestions"); },
+      acceptAllSuggestions() {
+        return request("/api/suggestions/accept-all", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: "{}" });
+      },
+      clearMemory() {
+        return request("/api/memory/clear", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ confirmed: true }) });
+      },
      confirmSuggestion(id, note) {
        return request("/api/suggestions/confirm", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ id: id, note: note }) });
      },
@@ -249,6 +261,32 @@
     catch (error) { /* Suggestions are secondary to the search surface. */ }
   }
 
+  $("#accept-all-suggestions").addEventListener("click", async function () {
+    const button = $("#accept-all-suggestions");
+    button.disabled = true;
+    try {
+      const result = await api.acceptAllSuggestions();
+      showToast("Saved " + result.accepted + " note(s).", false);
+      await loadSuggestions();
+      if (state.query) search();
+    } catch (error) { showToast(error.message, true); }
+    finally { button.disabled = false; }
+  });
+
+  $("#clear-memory").addEventListener("click", async function () {
+    if (!window.confirm("Clear all remembered files and notes? Real files will not be deleted.")) return;
+    const button = $("#clear-memory");
+    button.disabled = true;
+    try {
+      const result = await api.clearMemory();
+      resultsList.replaceChildren();
+      await loadSuggestions();
+      setState("empty");
+      showToast("Cleared " + result.cleared + " remembered file(s).", false);
+    } catch (error) { showToast(error.message, true); }
+    finally { button.disabled = false; }
+  });
+
   function renderFolders() {
     const list = $("#folders-list");
     list.replaceChildren(...state.folders.map(function (folder) {
@@ -290,9 +328,58 @@
   }
 
   async function loadSettings() {
-    try { state.settings = await api.settings(); renderSettings(); }
+    try { state.settings = await api.settings(); renderSettings(); maybeOpenSetup(); }
     catch (error) { $("#settings-state").textContent = "API unavailable: " + error.message; }
   }
+
+  function setupProvider() {
+    const selected = document.querySelector("input[name='setup-provider']:checked");
+    return selected ? selected.value : "local_ai";
+  }
+
+  function openSetup() {
+    const dialog = $("#setup-dialog");
+    if (typeof dialog.showModal === "function") dialog.showModal(); else dialog.setAttribute("open", "");
+  }
+
+  function closeSetup() {
+    const dialog = $("#setup-dialog");
+    if (dialog.open && dialog.close) dialog.close(); else dialog.removeAttribute("open");
+  }
+
+  function maybeOpenSetup() {
+    if (state.settings.setup_complete !== true) openSetup();
+  }
+
+  $("#setup-prepare").addEventListener("click", async function () {
+    const button = $("#setup-prepare");
+    button.disabled = true;
+    $("#setup-state").textContent = "Preparing required models… this can take a few minutes the first time.";
+    try {
+      const result = await api.prepareModels(setupProvider());
+      $("#setup-state").textContent = result.message;
+    } catch (error) { $("#setup-state").textContent = error.message; $("#setup-state").classList.add("error"); }
+    finally { button.disabled = false; }
+  });
+
+  $("#setup-form").addEventListener("submit", async function (event) {
+    event.preventDefault();
+    const folder = $("#setup-folder").value.trim();
+    const stateElement = $("#setup-state");
+    if (!folder) return;
+    try {
+      const preview = await api.previewFolder(folder);
+      $("#setup-preview").textContent = "Found " + preview.total + " file(s). Estimated indexing time: " + preview.estimated_seconds + "s.";
+      stateElement.textContent = "Indexing selected folder…";
+      const added = await api.addFolder(folder);
+      await api.saveSettings({ ai_mode: setupProvider(), setup_complete: true });
+      state.settings.setup_complete = true;
+      closeSetup();
+      await loadFolders();
+      await loadSuggestions();
+      showToast("Setup complete. Remembering " + (added.indexing ? added.indexing.indexed : preview.total) + " file(s).", false);
+    } catch (error) { stateElement.textContent = error.message; stateElement.classList.add("error"); }
+  });
 
   function openSettings() {
     const dialog = $("#settings-dialog");
@@ -343,11 +430,13 @@
     if (!path) return;
     const submit = event.currentTarget.querySelector(".submit-button"); submit.disabled = true; setFolderMessage("Adding folder…");
      try {
+       const preview = await api.previewFolder(path);
+       setFolderMessage("Found " + preview.total + " file(s). Estimated indexing time: " + preview.estimated_seconds + "s. Indexing now…");
        const added = await api.addFolder(path);
        state.folders = state.folders.concat([added && added.path ? added : { path: path }]);
        renderFolders(); updateFolderCount(); folderInput.value = "";
        const indexing = added && added.indexing;
-       setFolderMessage(indexing ? "Folder added. Indexed " + indexing.indexed + " existing file(s); " + indexing.skipped + " skipped." : "Folder added.");
+        setFolderMessage(indexing ? "Folder added. Indexed " + indexing.indexed + " existing file(s); " + indexing.skipped + " skipped." : "Folder added.");
        loadSuggestions();
      }
     catch (error) { setFolderMessage("API unavailable: " + error.message, true); }

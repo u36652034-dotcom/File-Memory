@@ -16,16 +16,18 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .actions import open_url
 from .db import Database
 from .paths import load_dotenv, resource_path
 from .service import FileMemoryService
+from .updates import UpdateManifest, check_for_update
 from .web import create_server
 
 
 WEBVIEW_TITLE = "File Memory"
 TOAST_DURATION_MS = 8000
 NOTIFICATION_WIDTH = 380
-NOTIFICATION_HEIGHT = 230
+NOTIFICATION_HEIGHT = 320
 APP_USER_MODEL_ID = "FileMemory.Desktop"
 TRAY_ICON_NAME = "filememory"
 
@@ -80,8 +82,10 @@ def is_setup_complete(service: FileMemoryService) -> bool:
     """
 
     settings = service.get_settings()
-    if "setup_complete" in settings:
-        return bool(settings["setup_complete"])
+    if settings.get("setup_complete") is True:
+        return True
+    if "setup_complete" in settings and settings["setup_complete"] is False and service.list_folders():
+        return True
     return bool(service.list_folders())
 
 
@@ -182,30 +186,62 @@ def notification_script(filename: str, note: str = "", suggestion_id: int | None
 
 
 def notification_popup_html() -> str:
-    """Return the small editable background notification surface."""
+    """Return the reusable native file/update notification surface."""
     return f"""<!doctype html><html><head><meta charset='utf-8'><style>
       * {{ box-sizing: border-box; }}
       html, body {{ width: 100%; height: 100%; margin: 0; overflow: hidden; }}
       body {{ padding: 16px; background: #faf9f4; color: #17142f; font-family: Segoe UI, Arial, sans-serif; border: 2px solid #17142f; border-radius: 14px; }}
       .kicker {{ color: #4135ef; font: 800 11px Arial, sans-serif; letter-spacing: .12em; }}
       .name {{ margin: 8px 0 12px; font: 900 20px/1 Impact, 'Arial Narrow', sans-serif; text-transform: uppercase; overflow-wrap: anywhere; }}
+      .details {{ max-height: 170px; overflow-y: auto; font-size: 12px; line-height: 1.35; }}
+      .details h3 {{ margin: 8px 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }}
+      .details ul {{ margin: 2px 0 6px 18px; padding: 0; }}
+      .details p {{ margin: 2px 0 6px; white-space: pre-wrap; }}
       input {{ width: 100%; height: 42px; padding: 8px 10px; border: 2px solid #17142f; border-radius: 7px; font: 700 13px Segoe UI, Arial, sans-serif; }}
       .actions {{ display: flex; gap: 8px; margin-top: 12px; }}
       button {{ padding: 9px 12px; border: 2px solid #17142f; border-radius: 6px; font: 800 11px Arial, sans-serif; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }}
-      #remember {{ background: #4135ef; color: #d7ff23; }} #dismiss {{ background: transparent; color: #17142f; }}
+      #remember, #download {{ background: #4135ef; color: #d7ff23; }} #dismiss, #later {{ background: transparent; color: #17142f; }}
     </style></head><body>
-      <div class='kicker'>NEW FILE · REMEMBER IT?</div><div id='name' class='name'>New file</div>
-      <input id='note' aria-label='Note for new file' type='text'>
-      <div class='actions'><button id='remember'>Remember</button><button id='dismiss'>Dismiss</button></div>
+      <section id='file-prompt'>
+        <div class='kicker'>NEW FILE · REMEMBER IT?</div><div id='name' class='name'>New file</div>
+        <input id='note' aria-label='Note for new file' type='text'>
+        <div class='actions'><button id='remember'>Remember</button><button id='dismiss'>Dismiss</button></div>
+      </section>
+      <section id='update-prompt' hidden>
+        <div class='kicker'>FILE MEMORY UPDATE</div><div class='name'>Version <span id='update-version'></span> is ready</div>
+        <div id='update-details' class='details'></div>
+        <div class='actions'><button id='download'>Download update</button><button id='later'>Later</button></div>
+      </section>
       <script>
         let timer;
+        let updateTimer;
+        const filePrompt = document.getElementById('file-prompt');
+        const updatePrompt = document.getElementById('update-prompt');
+        function showFilePrompt() {{ clearTimeout(updateTimer); filePrompt.hidden = false; updatePrompt.hidden = true; }}
+        function showUpdatePrompt() {{ clearTimeout(timer); filePrompt.hidden = true; updatePrompt.hidden = false; }}
+         function listMarkup(title, values) {{
+           if (!values || !values.length) return '';
+           return '<h3>' + escapeMarkup(title) + '</h3><ul>' + values.map((value) => '<li>' + escapeMarkup(value) + '</li>').join('') + '</ul>';
+         }}
+         function escapeMarkup(value) {{
+           return String(value ?? '').replace(/[&<>"']/g, (character) => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[character]));
+         }}
         window.setNotification = function (payload) {{
+          showFilePrompt();
           document.getElementById('name').textContent = payload.filename || 'New file';
           document.getElementById('note').value = payload.note || '';
           clearTimeout(timer); timer = setTimeout(() => window.pywebview.api.dismiss(), {TOAST_DURATION_MS});
         }};
+        window.setUpdateNotification = function (payload) {{
+          showUpdatePrompt();
+          document.getElementById('update-version').textContent = payload.version;
+           document.getElementById('update-details').innerHTML = listMarkup('Features', payload.features) + listMarkup('Fixes', payload.fixes) + (payload.release_notes ? '<h3>Release notes</h3><p>' + escapeMarkup(payload.release_notes) + '</p>' : '');
+          clearTimeout(updateTimer); updateTimer = setTimeout(() => window.pywebview.api.later(), {TOAST_DURATION_MS});
+        }};
         document.getElementById('remember').onclick = () => window.pywebview.api.remember(document.getElementById('note').value);
         document.getElementById('dismiss').onclick = () => window.pywebview.api.dismiss();
+        document.getElementById('later').onclick = () => window.pywebview.api.later();
+        document.getElementById('download').onclick = () => window.pywebview.api.download_update();
       </script></body></html>"""
 
 
@@ -238,6 +274,12 @@ class NotificationBridge:
     def dismiss(self) -> None:
         self.app._dismiss_background_notification()
 
+    def later(self) -> None:
+        self.app._dismiss_update_notification()
+
+    def download_update(self) -> None:
+        self.app._download_update()
+
 
 class DesktopApp:
     """Own the loopback service and a native pywebview window."""
@@ -253,6 +295,7 @@ class DesktopApp:
         self.window: Any | None = None
         self._server_thread: threading.Thread | None = None
         self._closed = False
+        self._exit_requested = False
         self._page_loaded = False
         self._dashboard_hidden = False
         self._tray_icon: Any | None = None
@@ -262,6 +305,9 @@ class DesktopApp:
         self._notification_window: Any | None = None
         self._notification_bridge = NotificationBridge(self)
         self._background_notification: dict[str, Any] | None = None
+        self._update_notification: UpdateManifest | None = None
+        self._pending_update_notification: UpdateManifest | None = None
+        self._update_thread: threading.Thread | None = None
 
         # FileMemoryService invokes this from the watchdog worker thread.  The
         # handler never blocks the watcher and only marshals a small toast to
@@ -331,6 +377,9 @@ class DesktopApp:
                     suggestion_id = int(pending["id"]) if pending else None
                     path = str(record.get("path", ""))
                     if self._dashboard_hidden and self._notification_window is not None:
+                        if self._update_notification is not None:
+                            self._pending_update_notification = self._update_notification
+                            self._update_notification = None
                         self._background_notification = {"suggestion_id": suggestion_id, "path": path}
                         x, y = notification_popup_position()
                         self._notification_window.move(x, y)
@@ -360,12 +409,93 @@ class DesktopApp:
             print(f"Warning: could not remember file notification: {error}")
 
     def _dismiss_background_notification(self) -> None:
+        pending_update: UpdateManifest | None = None
         self._background_notification = None
         if self._notification_window is not None:
             try:
                 self._notification_window.hide()
             except Exception:
                 pass
+        pending_update = self._pending_update_notification
+        self._pending_update_notification = None
+        if pending_update is not None:
+            self._show_update_notification(pending_update)
+
+    def _show_update_notification(self, manifest: UpdateManifest) -> None:
+        """Show an update in the same cancelable native surface as file prompts."""
+
+        if self._notification_window is None or self._closed:
+            return
+        with self._notification_lock:
+            if self._background_notification is not None:
+                self._pending_update_notification = manifest
+                return
+            self._update_notification = manifest
+            payload = {
+                "version": manifest.version,
+                "fixes": list(manifest.fixes),
+                "features": list(manifest.features),
+                "release_notes": manifest.release_notes,
+            }
+            try:
+                x, y = notification_popup_position()
+                self._notification_window.move(x, y)
+                self._notification_window.evaluate_js(
+                    f"window.setUpdateNotification({json.dumps(payload)})"
+                )
+                self._notification_window.show()
+            except Exception:
+                self._update_notification = None
+
+    def _dismiss_update_notification(self) -> None:
+        self._update_notification = None
+        if self._notification_window is not None:
+            try:
+                self._notification_window.hide()
+            except Exception:
+                pass
+
+    def _download_update(self) -> None:
+        manifest = self._update_notification
+        self._dismiss_update_notification()
+        if manifest is None:
+            return
+        try:
+            open_url(manifest.release_url)
+        except Exception as error:
+            # Browser launch failures must not affect tracking or the desktop app.
+            print(f"Warning: could not open update URL: {error}")
+
+    def _on_notification_closing(self, *_args: Any) -> bool:
+        """Make the native X a cancel action while allowing tray exit to destroy it."""
+
+        if self._exit_requested or self._closed:
+            return True
+        if self._update_notification is not None:
+            self._dismiss_update_notification()
+        else:
+            self._dismiss_background_notification()
+        return False
+
+    def _start_update_check(self) -> None:
+        if self._update_thread is not None:
+            return
+
+        def check() -> None:
+            try:
+                manifest = check_for_update()
+            except Exception:
+                # Update checks are optional and must never affect tracking or UI.
+                return
+            if manifest is not None and not self._closed:
+                self._show_update_notification(manifest)
+
+        self._update_thread = threading.Thread(
+            target=check,
+            name="filememory-update-check",
+            daemon=True,
+        )
+        self._update_thread.start()
 
     def _show_dashboard(self, *_args: Any) -> None:
         if self.window is None or self._closed:
@@ -445,8 +575,10 @@ class DesktopApp:
             self._tray_icon = None
 
     def _exit_from_tray(self, *_args: Any) -> None:
+        self._exit_requested = True
         self._stop_tray()
         self._dismiss_background_notification()
+        self._dismiss_update_notification()
         if self._notification_window is not None:
             try:
                 self._notification_window.destroy()
@@ -460,6 +592,13 @@ class DesktopApp:
             except Exception:
                 pass
         self._close()
+
+    def _on_dashboard_closing(self, *_args: Any) -> bool:
+        """Turn the dashboard X into a tray hide instead of a process exit."""
+        if self._exit_requested or self._closed:
+            return True
+        self._hide_dashboard()
+        return False
 
     def _close(self, *_args: Any) -> None:
         if self._closed:
@@ -512,8 +651,12 @@ class DesktopApp:
                 hidden=True,
                 js_api=self._notification_bridge,
             )
+            self._notification_window.events.closing += self._on_notification_closing
             self.window.events.loaded += self._on_page_loaded
-            self.window.events.closed += self._close
+            # pywebview's closing event can cancel the native X close.  The
+            # tray Exit action sets _exit_requested so it can still destroy the
+            # window and stop the service normally.
+            self.window.events.closing += self._on_dashboard_closing
             # pywebview does not expose an icon argument. Apply the ICO after
             # the native window exists; the delayed retry handles WebView2's
             # asynchronous HWND creation.
@@ -521,6 +664,7 @@ class DesktopApp:
                 apply_windows_icon()
                 if hide_on_ready:
                     self._hide_dashboard()
+                self._start_update_check()
 
             threading.Timer(0.8, apply_windows_icon).start()
             # edgechromium is pywebview's Microsoft Edge WebView2 backend on

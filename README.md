@@ -199,49 +199,114 @@ these commands from a Windows x64 checkout:
 ```powershell
 py -3.12 -m venv .venv                 # only needed once
 .\.venv\Scripts\python.exe -m pip install -r requirements.lock
-.\scripts\build_windows.ps1 -Mode both
+.\scripts\build_windows.ps1 -Variant online -Mode both
 ```
 
 The build script installs PyInstaller and Pillow only into `.venv` when they
 are missing, generates `assets\filememory.ico`, and writes these portable
 artifacts:
 
-* `dist\FileMemory\` — onedir distribution, suitable for the installer.
-* `dist\FileMemory-onefile.exe` — onefile distribution for copying as one
-  executable.
+* `dist\online\FileMemory\` and `dist\online\FileMemory-onefile.exe` — the
+  online artifacts. They include the model runtime and first-run download
+  flow, but no Hugging Face model weights.
+* `dist\offline\FileMemory\` and `dist\offline\FileMemory-onefile.exe` —
+  offline artifacts with the cached Hugging Face assets under `models\`.
+
+Separate output roots prevent an offline model payload from leaking into an
+online build. The build removes the selected output before PyInstaller runs,
+and online validation rejects model-cache directories.
 
 Use the project interpreter to run the validation script after a build:
 
 ```powershell
-.\scripts\validate_windows_package.ps1 -Mode both
+.\scripts\validate_windows_package.ps1 -Variant online -Mode both
 ```
 
 The spec includes every `filememory` module, the exact `web` files, pywebview,
-and the model download scripts. It uses `filememory\desktop.py` through
-`packaging\desktop_entrypoint.py`, so the packaged app opens the native
-WebView2 shell rather than an external browser. The installer build includes
-the model runtime so the embedded web UI can use the optional local model after
-installation. The application stores its database and model cache in the
-user's application-data directory by default.
+the model runtime, and the model download scripts. It uses
+`filememory\desktop.py` through `packaging\desktop_entrypoint.py`, so the
+packaged app opens the native WebView2 shell rather than an external browser.
+The application stores its database and model cache in the user's
+application-data directory by default.
+
+### Online installer
+
+```powershell
+.\scripts\build_installer.ps1 -Variant online
+.\scripts\validate_windows_package.ps1 -Variant online -Mode onedir -RequireInstaller
+```
+
+Output: `dist\FileMemory-Setup-online.exe`.
+
+### Offline installer
+
+Prepare both models into the default Windows cache, then build from that cache:
+
+```powershell
+.\scripts\prepare_models_windows.ps1
+.\scripts\build_installer.ps1 -Variant offline
+.\scripts\validate_windows_package.ps1 -Variant offline -Mode onedir -RequireInstaller
+```
+
+The default source is `%LOCALAPPDATA%\FileMemory\models`. A different cache can
+be supplied without committing a machine-specific path:
+
+```powershell
+.\scripts\build_windows.ps1 -Variant offline -Mode onedir `
+  -ModelSource 'D:\FileMemoryModelCache'
+.\scripts\validate_windows_package.ps1 -Variant offline -Mode onedir
+```
+
+The offline build requires snapshot files for both
+`sentence-transformers/all-MiniLM-L6-v2` and
+`HuggingFaceTB/SmolLM2-360M-Instruct`; it fails before PyInstaller if either
+cache is absent. Output: `dist\FileMemory-Setup-offline.exe`.
+
+Use `-SkipPackageBuild` with `build_installer.ps1` when the matching
+`dist\online\FileMemory\` or `dist\offline\FileMemory\` directory already
+exists. `ISCC.exe` is an external Inno Setup tool and is not installed by the
+project scripts.
+
+### Windows release checklist
+
+1. Build and validate both onedir variants; confirm online has no model cache
+   and offline has both model cache trees under `models\`.
+2. Compile and validate both installers with `-RequireInstaller`.
+3. On clean Windows x64 with WebView2 Runtime, verify install path, Start Menu
+   and Desktop shortcuts, optional HKCU startup entry, minimized tray launch,
+   dashboard hide/show, and tray Exit behavior.
+4. Verify online first-run model preparation with network access; disconnect the
+   network and verify offline semantic search and Local AI setup.
+5. Record SHA-256 hashes for both installers before the GitHub release.
 
 The native shell, packaged executable, taskbar identity, and notification-area
 icon use the custom blue/lime FM grid icon in `assets\filememory.ico`. The
 dashboard footer credits **Vibecoded by Osman
 ♥ · with OmniRush ♥**.
 
-### Per-user installer
+The desktop shell checks the production update manifest once per local calendar
+day in a background thread. Network or malformed-manifest failures are ignored
+so tracking continues normally. Set `FILE_MEMORY_UPDATE_MANIFEST_URL` to use a
+different HTTPS manifest during development; each manifest must provide a
+semantic `version`, an HTTPS `release_url`, and optional `features`, `fixes`,
+and `release_notes` fields.
+
+### Installer behavior
 
 Install [Inno Setup](https://jrsoftware.org/isinfo.php) on the Windows build
-machine, build the onedir artifact, then compile the installer:
+machine. Build either variant as documented above, or compile an already-built
+matching onedir artifact:
 
 ```powershell
-.\scripts\build_installer.ps1
+.\scripts\build_installer.ps1 -Variant online
+.\scripts\build_installer.ps1 -Variant offline
 ```
 
-If `dist\FileMemory\` already exists, skip the PyInstaller step:
+If `dist\online\FileMemory\` or `dist\offline\FileMemory\` already exists,
+skip the PyInstaller step:
 
 ```powershell
-.\scripts\build_installer.ps1 -SkipPackageBuild
+.\scripts\build_installer.ps1 -Variant online -SkipPackageBuild
 ```
 
 The installer defaults to `C:\Program Files\File Memory` and declares

@@ -18,6 +18,16 @@ if not (ROOT / "filememory" / "desktop.py").is_file():
     raise SystemExit("Native entrypoint filememory/desktop.py is missing.")
 entrypoint = ROOT / "packaging" / "desktop_entrypoint.py"
 
+
+def collect_model_cache(source: Path):
+    """Return PyInstaller data entries for a staged offline model cache."""
+    if not source.is_dir():
+        raise SystemExit(f"Offline model cache is missing: {source}")
+    files = sorted(path for path in source.rglob("*") if path.is_file())
+    if not files:
+        raise SystemExit(f"Offline model cache is empty: {source}")
+    return [(str(path), str(Path("models") / path.relative_to(source).parent)) for path in files]
+
 datas = [
     (str(ROOT / "web"), "web"),
     (str(ROOT / "scripts" / "prepare_models.py"), "tools/scripts"),
@@ -27,6 +37,20 @@ datas = [
     (str(ROOT / "assets" / "filememory.ico"), "assets"),
     (str(ROOT / ".env.example"), "."),
 ]
+model_source = os.environ.get("FILE_MEMORY_MODEL_SOURCE")
+if model_source:
+    # build_windows.ps1 stages %LOCALAPPDATA%\FileMemory\models in the
+    # project-local build tree before invoking PyInstaller.
+    source = Path(model_source).resolve()
+    required_caches = (
+        "models--sentence-transformers--all-MiniLM-L6-v2",
+        "models--HuggingFaceTB--SmolLM2-360M-Instruct",
+    )
+    for cache_name in required_caches:
+        snapshot_dir = source / cache_name / "snapshots"
+        if not snapshot_dir.is_dir() or not any(snapshot_dir.rglob("*")):
+            raise SystemExit(f"Offline model cache has no snapshot files for {cache_name}: {source}")
+    datas += collect_model_cache(source)
 # Supply clean Python sources for the optional, separate project-local model
 # downloader. Never collect developer caches, databases, secrets, or models.
 datas += [(str(path), "tools/filememory") for path in sorted((ROOT / "filememory").glob("*.py"))]

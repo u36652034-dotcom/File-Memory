@@ -105,6 +105,18 @@ class FileMemoryService:
             self.start_tracking()
         return current
 
+    def complete_setup(self, ai_mode: str, model_preparer: Callable[[str], str] | None = None) -> dict[str, Any]:
+        """Prepare required models and persist the explicit first-run choice."""
+        if ai_mode not in {"local_ai", "groq"}:
+            raise ValueError("first-run setup requires Local AI or Groq")
+        if model_preparer is None:
+            from .model_setup import prepare_models_for_mode
+
+            model_preparer = prepare_models_for_mode
+        message = model_preparer(ai_mode)
+        settings = self.update_settings(ai_mode=ai_mode, setup_complete=True)
+        return {"settings": settings, "message": message}
+
     def is_tracking_paused(self) -> bool:
         return bool(self.get_settings()["tracking_paused"])
 
@@ -147,19 +159,35 @@ class FileMemoryService:
         if not root.is_dir():
             summary["status"] = "folder-not-found"
             return summary
-        for candidate in root.rglob("*"):
+        database_path = Path(self.database.path).resolve() if self.database.path != ":memory:" else None
+        candidates = [
+            candidate for candidate in root.rglob("*")
+            if candidate.is_file() and (database_path is None or candidate.resolve() != database_path)
+        ]
+        summary["total"] = len(candidates)
+        for candidate in candidates:
             if not candidate.is_file():
                 continue
             database_path = Path(self.database.path)
             if database_path.name != ":memory:" and candidate.resolve() == database_path.resolve():
                 continue
-            summary["total"] += 1
             result = self._index_path(candidate, None, respect_pause=False)
             if result.status == "indexed":
                 summary["indexed"] += 1
             else:
                 summary["skipped"] += 1
         return summary
+
+    def preview_folder(self, path: str) -> dict[str, Any]:
+        root = Path(path).expanduser().resolve(strict=False)
+        if not root.is_dir():
+            raise ValueError("watched folder must exist and be a directory")
+        database_path = Path(self.database.path).resolve() if self.database.path != ":memory:" else None
+        total = sum(
+            1 for candidate in root.rglob("*")
+            if candidate.is_file() and (database_path is None or candidate.resolve() != database_path)
+        )
+        return {"total": total, "estimated_seconds": round(max(0.5, total * 0.08), 1)}
 
     def suggest_note(self, filename: str, snippet: str = "") -> str:
         return self._suggest_note_details(filename, snippet)[0]
@@ -192,6 +220,14 @@ class FileMemoryService:
         if record is None:
             raise ValueError("Pending suggestion not found")
         return self._without_embedding(record)
+
+    def accept_all_suggestions(self) -> int:
+        return self.database.confirm_all_pending_suggestions()
+
+    def clear_memory(self, confirmed: bool = False) -> int:
+        if not confirmed:
+            raise ConfirmationRequired("Clearing File Memory requires confirmation")
+        return self.database.clear_all_files()
 
     def list_files(self) -> list[dict[str, Any]]:
         """Return inbox-safe records without embedding payloads."""

@@ -7,10 +7,30 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 class ActionError(ValueError):
     pass
+
+
+def open_url(url: str) -> str:
+    """Open an HTTPS URL with the user's platform browser without a shell."""
+
+    candidate = str(url).strip()
+    parsed = urlparse(candidate)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise ActionError("only absolute HTTPS URLs can be opened")
+    if sys.platform == "win32":
+        os.startfile(candidate)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", candidate])
+    else:
+        opener = shutil.which("xdg-open")
+        if not opener:
+            raise ActionError("No desktop URL opener is available (xdg-open was not found).")
+        subprocess.Popen([opener, candidate])
+    return candidate
 
 
 def open_file(path: str | Path) -> str:

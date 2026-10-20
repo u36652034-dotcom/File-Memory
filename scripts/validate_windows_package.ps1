@@ -2,13 +2,16 @@
 param(
     [ValidateSet("onedir", "onefile", "both")]
     [string]$Mode = "both",
+    [Alias("BuildVariant")]
+    [ValidateSet("online", "offline")]
+    [string]$Variant = "online",
     [switch]$RequireInstaller,
     [switch]$SmokeTest
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$dist = Join-Path $root "dist"
+$dist = Join-Path $root (Join-Path "dist" $Variant)
 
 function Assert-Artifact {
     param([string]$Path, [switch]$AllowInstallerBootstrapper)
@@ -43,6 +46,30 @@ function Invoke-SmokeTest {
     }
 }
 
+function Assert-ModelPayload {
+    param([string]$PackageRoot)
+    $models = Join-Path $PackageRoot "models"
+    if (-not (Test-Path $models -PathType Container)) { throw "Offline artifact is missing bundled models: $models" }
+    $files = @(Get-ChildItem -LiteralPath $models -File -Recurse -Force)
+    if ($files.Count -eq 0) { throw "Offline artifact has an empty bundled models directory: $models" }
+    foreach ($modelName in @(
+        "models--sentence-transformers--all-MiniLM-L6-v2",
+        "models--HuggingFaceTB--SmolLM2-360M-Instruct"
+    )) {
+        $snapshotFiles = @(Get-ChildItem -LiteralPath (Join-Path (Join-Path $models $modelName) "snapshots") -File -Recurse -Force -ErrorAction SilentlyContinue)
+        if ($snapshotFiles.Count -eq 0) { throw "Offline artifact is missing snapshot files for ${modelName}: $models" }
+    }
+    Write-Host "Validated offline model payload ($($files.Count) files): $models"
+}
+
+function Assert-NoModelPayload {
+    param([string]$PackageRoot)
+    $models = Join-Path $PackageRoot "models"
+    if (Test-Path $models) { throw "Online artifact unexpectedly contains bundled model weights: $models" }
+    $cacheDirectories = @(Get-ChildItem -LiteralPath $PackageRoot -Directory -Recurse -Force | Where-Object { $_.Name -like "models--*" })
+    if ($cacheDirectories.Count -gt 0) { throw "Online artifact unexpectedly contains Hugging Face model cache directories: $($cacheDirectories[0].FullName)" }
+}
+
 if (-not (Test-Path (Join-Path $root "assets\filememory.ico") -PathType Leaf)) {
     throw "Generated icon is missing. Run scripts\build_windows.ps1 first."
 }
@@ -58,6 +85,8 @@ if ($Mode -in @("onedir", "both")) {
         $path = Join-Path (Join-Path $dist "FileMemory") $required
         if (-not (Test-Path $path -PathType Leaf)) { throw "Onedir artifact is missing bundled file: $required" }
     }
+    if ($Variant -eq "offline") { Assert-ModelPayload (Join-Path $dist "FileMemory") }
+    else { Assert-NoModelPayload (Join-Path $dist "FileMemory") }
     if ($SmokeTest) { Invoke-SmokeTest $onedirExe (Join-Path $dist "FileMemory") }
 }
 if ($Mode -in @("onefile", "both")) {
@@ -68,7 +97,7 @@ if ($Mode -in @("onefile", "both")) {
 if ($RequireInstaller) {
     # Inno Setup's launcher is commonly a 32-bit PE even when it installs an
     # x64 application; the packaged FileMemory.exe above is the x64 payload.
-    Assert-Artifact (Join-Path $dist "FileMemory-Setup.exe") -AllowInstallerBootstrapper
+    Assert-Artifact (Join-Path $root "dist\FileMemory-Setup-$Variant.exe") -AllowInstallerBootstrapper
 }
 
 Write-Host "File Memory Windows package validation passed."

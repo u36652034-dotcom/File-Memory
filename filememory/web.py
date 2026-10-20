@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .db import Database
+from .model_setup import prepare_models_for_mode
 from .paths import load_dotenv
 from .service import ConfirmationRequired, FileMemoryService
 
@@ -69,6 +70,12 @@ def create_server(service: FileMemoryService, host: str = "127.0.0.1", port: int
                     self._send(200, {"folders": service.list_folders()})
                 elif parsed.path == "/api/settings":
                     self._send(200, service.get_settings())
+                elif parsed.path == "/api/models/status":
+                    ready, message = service.embedding_provider.readiness()
+                    self._send(200, {"ready": ready, "message": message})
+                elif parsed.path == "/api/setup":
+                    settings = service.get_settings()
+                    self._send(200, {"setup_complete": bool(settings.get("setup_complete", False))})
                 elif parsed.path == "/api/suggestions":
                     self._send(200, {"suggestions": service.list_pending_suggestions()})
                 elif parsed.path == "/api/search":
@@ -85,15 +92,25 @@ def create_server(service: FileMemoryService, host: str = "127.0.0.1", port: int
                 payload = _body(self)
                 if self.path == "/api/folders":
                     result = service.add_folder(str(payload["path"]))
+                elif self.path == "/api/folders/preview":
+                    result = service.preview_folder(str(payload["path"]))
                 elif self.path == "/api/folders/remove":
                     result = {"removed": service.remove_folder(str(payload["path"]), bool(payload.get("confirmed")))}
                 elif self.path == "/api/settings":
                     result = service.update_settings(**payload)
+                elif self.path == "/api/models/prepare":
+                    result = {"message": prepare_models_for_mode(str(payload.get("provider", "groq")))}
+                elif self.path == "/api/setup":
+                    result = service.complete_setup(str(payload.get("ai_mode", "")))
                 elif self.path == "/api/suggestions/confirm":
                     suggestion_id = payload.get("id", payload.get("suggestion_id"))
                     if suggestion_id is None:
                         raise ValueError("suggestion id is required")
                     result = {"file": service.confirm_suggestion(suggestion_id, payload.get("note"))}
+                elif self.path == "/api/suggestions/accept-all":
+                    result = {"accepted": service.accept_all_suggestions()}
+                elif self.path == "/api/memory/clear":
+                    result = {"cleared": service.clear_memory(bool(payload.get("confirmed")))}
                 elif self.path.startswith("/api/suggestions/") and self.path.endswith("/confirm"):
                     suggestion_id = self.path[len("/api/suggestions/") : -len("/confirm")].strip("/")
                     if not suggestion_id.isdigit():

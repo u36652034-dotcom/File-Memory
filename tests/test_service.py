@@ -91,3 +91,28 @@ def test_pause_then_resume_tracking_restarts_event_watcher(tmp_path):
     service.update_settings(tracking_paused=False)
     assert service.tracking_active()
     service.stop_tracking()
+
+
+def test_bulk_accept_and_clear_memory_do_not_delete_real_files(tmp_path):
+    service = FileMemoryService(Database(tmp_path / "memory.sqlite3"))
+    service.indexer.stability_wait = 0
+    first = tmp_path / "one.txt"
+    second = tmp_path / "two.txt"
+    first.write_text("first", encoding="utf-8")
+    second.write_text("second", encoding="utf-8")
+    service.index_path(first)
+    service.index_path(second)
+    assert service.accept_all_suggestions() == 2
+    assert all(record["note"] for record in service.list_files())
+    assert service.clear_memory(confirmed=True) == 2
+    assert service.list_files() == []
+    assert first.exists() and second.exists()
+
+
+def test_preview_folder_reports_count_and_fast_estimate(tmp_path):
+    service = FileMemoryService(Database(tmp_path / "memory.sqlite3"))
+    (tmp_path / "one.txt").write_text("one", encoding="utf-8")
+    (tmp_path / "two.txt").write_text("two", encoding="utf-8")
+    preview = service.preview_folder(str(tmp_path))
+    assert preview["total"] == 2
+    assert preview["estimated_seconds"] > 0

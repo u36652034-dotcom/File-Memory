@@ -99,6 +99,8 @@ h1 em { color: var(--lime); font-style: normal; }
 .suggestions-heading-row h2 { margin: 0; color: var(--paper); font-family: var(--display); font-size: clamp(32px, 4vw, 48px); line-height: .88; text-transform: uppercase; }
 .suggestions-heading-row h2 strong { color: var(--lime); font-weight: inherit; }
 .suggestions-heading-row p { max-width: 280px; margin: 0; color: var(--lavender); font-size: 13px; font-weight: 700; line-height: 1.35; }
+.suggestion-bulk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.suggestion-bulk-actions .dark-button { margin-top: 0; }
 .suggestions-list { display: grid; gap: 17px; }
 .suggestion-card { padding: 18px; border: var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); box-shadow: 4px 4px 0 var(--lime); }
 .suggestion-top { display: flex; justify-content: space-between; gap: 12px; align-items: start; }

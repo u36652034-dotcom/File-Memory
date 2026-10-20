@@ -88,6 +88,10 @@
             <div class="suggestions-heading-row">
               <h2 id="suggestions-heading">Make them<br /><strong>yours.</strong></h2>
               <p>New files get a draft note. Confirm it or edit it before it becomes part of your memory.</p>
+              <div class="suggestion-bulk-actions">
+                <button id="accept-all-suggestions" class="dark-button" type="button">Accept all</button>
+                <button id="clear-memory" class="action-button" type="button">Clear memory</button>
+              </div>
             </div>
             <div id="suggestions-list" class="suggestions-list"></div>
           </section>
@@ -156,6 +160,24 @@
         <button id="native-file-dismiss" class="native-file-dismiss" type="button">Dismiss</button>
       </div>
     </section>
+    <dialog id="setup-dialog" class="folders-dialog" aria-labelledby="setup-title">
+      <div class="dialog-card setup-card">
+        <div class="section-kicker"><span>01</span> First-run setup</div>
+        <h2 id="setup-title">Make it<br /><strong>yours.</strong></h2>
+        <p class="dialog-copy">Choose a folder and how File Memory should write draft notes. The embedding model is required for Meaning search.</p>
+        <form id="setup-form" class="settings-form">
+          <label for="setup-folder">Folder to remember</label>
+          <input id="setup-folder" type="text" required placeholder="C:\\Users\\you\\Downloads" />
+          <div id="setup-preview" class="folder-state" aria-live="polite"></div>
+          <label>Note provider</label>
+          <label class="settings-toggle"><span><b>Local AI</b><small>Downloads SmolLM2 for private local drafts.</small></span><input name="setup-provider" type="radio" value="local_ai" checked /></label>
+          <label class="settings-toggle"><span><b>Groq</b><small>Uses GROQ_API_KEY from .env; only the embedding model is downloaded.</small></span><input name="setup-provider" type="radio" value="groq" /></label>
+          <button id="setup-prepare" class="dark-button" type="button">Prepare required models</button>
+          <button class="dark-button" type="submit">Finish setup</button>
+          <div id="setup-state" class="folder-state" aria-live="polite"></div>
+        </form>
+      </div>
+    </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="app.js" defer></script>
   </body>

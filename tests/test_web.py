@@ -49,3 +49,25 @@ def test_loopback_api_exposes_and_confirms_pending_suggestions(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_loopback_api_supports_bulk_accept_and_clear(tmp_path):
+    service = FileMemoryService(Database(tmp_path / "memory.sqlite3"))
+    service.indexer.stability_wait = 0
+    path = tmp_path / "one.txt"
+    path.write_text("one", encoding="utf-8")
+    service.index_path(path)
+    server = create_server(service, port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{server.server_port}"
+    try:
+        request = Request(base + "/api/suggestions/accept-all", data=b"{}", method="POST")
+        assert json.loads(urlopen(request).read())["accepted"] == 1
+        request = Request(base + "/api/memory/clear", data=b'{"confirmed":true}', headers={"Content-Type": "application/json"}, method="POST")
+        assert json.loads(urlopen(request).read())["cleared"] == 1
+        assert path.exists()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
