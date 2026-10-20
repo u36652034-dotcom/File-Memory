@@ -10,6 +10,9 @@ if (-not $SkipPackageBuild) {
     if ($LASTEXITCODE -ne 0) { throw "Windows package build failed." }
 }
 
+& (Join-Path $root ".venv\Scripts\python.exe") (Join-Path $root "scripts\generate_installer_art.py")
+if ($LASTEXITCODE -ne 0) { throw "Installer artwork generation failed." }
+
 $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 if ($null -eq $iscc) {
     throw "Inno Setup Compiler (ISCC.exe) was not found. Install Inno Setup on Windows, then rerun scripts\build_installer.ps1. No global Python install is required."

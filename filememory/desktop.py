@@ -553,8 +553,15 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="start the native window minimized",
     )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="force the dashboard to open when setup is already complete",
+    )
     args = parser.parse_args(argv)
-    build_app_from_environment().run(start_minimized=args.minimized)
+    app = build_app_from_environment()
+    start_hidden = not args.show and (args.minimized or is_setup_complete(app.service))
+    app.run(start_minimized=start_hidden)
 
 
 if __name__ == "__main__":

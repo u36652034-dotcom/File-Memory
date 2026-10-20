@@ -246,9 +246,10 @@ If `dist\FileMemory\` already exists, skip the PyInstaller step:
 
 The installer defaults to `%LOCALAPPDATA%\Programs\File Memory` and declares
 `PrivilegesRequired=lowest`, so administrator elevation is not required. It
-creates Start Menu and Desktop shortcuts and shows a checked-by-default,
-explicit checkbox for adding a minimized shortcut in the per-user Startup
-folder. A separate
+creates Start Menu and Desktop shortcuts and creates a checked-by-default
+HKCU Startup Apps entry that launches the app minimized to the notification
+area. Windows Startup Apps/Task Manager can disable or re-enable that entry.
+A separate
 post-install checkbox lets the user launch the app immediately. File Memory
 only accesses folders the user explicitly selects inside the app; it does not
 request or require administrator-only Windows permissions.
