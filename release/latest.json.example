@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "release_url": "https://github.com/OWNER/REPOSITORY/releases/tag/v1.0.0",
+  "features": [
+    "Native Windows tray background operation",
+    "First-run Local AI or Groq setup",
+    "Bulk note acceptance and memory clearing",
+    "Online and offline installers"
+  ],
+  "fixes": [
+    "More reliable startup and folder indexing",
+    "Improved dashboard hide and tray behavior"
+  ],
+  "release_notes": "File Memory 1.0.0 is the first public Windows release."
+}
