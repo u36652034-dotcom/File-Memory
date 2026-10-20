@@ -47,7 +47,7 @@ def create_local_server(
     return server, f"http://{bound_host}:{bound_port}/"
 
 
-def window_options(start_minimized: bool = False) -> dict[str, Any]:
+def window_options(start_minimized: bool = False, hidden: bool = False) -> dict[str, Any]:
     """Return the native window settings used by the packaged entrypoint."""
 
     return {
@@ -57,6 +57,7 @@ def window_options(start_minimized: bool = False) -> dict[str, Any]:
         "min_size": (900, 620),
         "resizable": True,
         "minimized": start_minimized,
+        "hidden": hidden,
     }
 
 
@@ -495,7 +496,7 @@ class DesktopApp:
                 # Tray minimization is a hide operation, not a minimized
                 # taskbar button.  This keeps the dashboard out of the taskbar
                 # while preserving the running watcher/service process.
-                **window_options(False),
+                **window_options(False, hidden=hide_on_ready),
             )
             popup_x, popup_y = notification_popup_position()
             self._notification_window = webview.create_window(

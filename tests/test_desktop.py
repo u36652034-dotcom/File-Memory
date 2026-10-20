@@ -54,6 +54,10 @@ def test_desktop_window_configuration_preserves_minimized_startup():
     assert options["min_size"] == (900, 620)
 
 
+def test_completed_startup_can_create_the_window_hidden_from_the_taskbar():
+    assert window_options(hidden=True)["hidden"] is True
+
+
 def test_startup_identity_and_tray_minimized_decision_are_display_free(tmp_path):
     service = FileMemoryService(Database(tmp_path / "memory.sqlite3"))
     assert APP_USER_MODEL_ID == "FileMemory.Desktop"
